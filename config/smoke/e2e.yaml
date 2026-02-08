@@ -1,0 +1,35 @@
+# SMOKE TEST: End-to-end validation with LLM judge (3 samples).
+# Tests full pipeline including judge scoring. Takes ~1-2 minutes.
+# Run: uv run recite.py run --config config/smoke/e2e.yaml --backend ucsf_versa
+
+num_samples: 3  # Only load 3 samples from DB
+
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: false  # No RAG sweep for smoke test
+
+models:
+  - id: versa-4o-mini
+    api_type: ucsf_versa
+    model: gpt-4o-mini-2024-07-18
+    context_window: 128000
+  - id: local-qwen-0.5b
+    api_type: python_gpu
+    model: Qwen/Qwen2.5-0.5B-Instruct
+    gpus: 1
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: llm_judge
+judge_api_type: ucsf_versa
+judge_model_type: "4o"
+two_step: false
+batch_size: 3
+top_k: 10
+wait_for_revive_seconds: 0
+
+splits_to_run: [benchmark]
+prompt_version: smoke_test
+
