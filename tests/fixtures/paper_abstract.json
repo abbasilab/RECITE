@@ -1,0 +1,12 @@
+{
+  "paper_id": "SYNTH-2024-001",
+  "title": "Broadening Eligibility Criteria in Diabetes Trials: A Systematic Review",
+  "authors": ["A. Smith", "B. Jones", "C. Lee"],
+  "year": 2024,
+  "journal": "Journal of Clinical Trials",
+  "abstract": "Background: Overly restrictive eligibility criteria are a major barrier to enrollment in Type 2 Diabetes trials, leading to slow accrual and limited generalizability. We conducted a systematic review of 45 completed Phase III diabetes trials to evaluate the impact of eligibility criterion revisions on enrollment rates. Methods: We identified protocol amendments that broadened inclusion or narrowed exclusion criteria and measured pre- vs post-amendment monthly accrual. Results: Trials that raised the upper age limit from 65 to 75 years experienced a median 28% increase in monthly enrollment (IQR 18-42%). Relaxing renal function thresholds from eGFR 60 to eGFR 45 mL/min/1.73m2 yielded a 15% enrollment gain. Conclusions: Future diabetes trials should expand age limits to include elderly patients up to 75 years and should consider relaxing renal exclusion criteria to eGFR < 45 mL/min/1.73m2. These changes would substantially improve accrual without compromising safety based on available evidence.",
+  "directives": [
+    "Future diabetes trials should expand age limits to include elderly patients up to 75 years",
+    "Trials should consider relaxing renal exclusion criteria to eGFR < 45 mL/min/1.73m2"
+  ]
+}

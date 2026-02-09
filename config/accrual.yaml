@@ -1,0 +1,49 @@
+# Accrual pipeline config.
+# Run: uv run accrual.py --config config/accrual.yaml  (uses limit: 100 unless --limit overrides)
+
+# DB paths (relative to project root or absolute). DBs live in data/dev/ (or set LOCAL_DB_DIR in .env)
+clintrialm_db_path: data/dev/clintrialm.db
+recite_db_path: data/dev/recite.db
+accrual_db_path: data/dev/accrual.db
+
+# Crawler tables: documents_local and paper_trial_matches_local use this preset
+model_preset: local
+
+# LLM for paper Q&A (and optionally EC amendment)
+# Local endpoint (vLLM / OpenAI-compatible server)
+# llm:
+#   endpoint: http://localhost:8000/v1
+#   model: local-model
+# Cost-effective UCSF Versa: uncomment below and comment out the block above. Requires UCSF_API_KEY, UCSF_API_VER, UCSF_RESOURCE_ENDPOINT.
+llm:
+  api_type: ucsf_versa
+  model: gpt-4o-mini-2024-07-18
+
+# Phase 1: max documents to screen (CLI --limit overrides this)
+limit: 100
+
+# Match phase: for top papers with no paper_trial_matches, use LLM (Versa) to find and score trials (limit per paper)
+# Requires api_type: ucsf_versa. Use --skip-match-phase to disable.
+match_trials_phase: true
+match_trial_limit: 20
+
+# Evidence summary phase: generate LLM evidenced summary per paper-trial (how ECs amended + accrual with quotes).
+# Requires api_type: ucsf_versa. Use --skip-evidence-phase to disable when enabled.
+evidence_summary_phase: true
+
+# Backfill impact_evidence: after Phase 1, re-call impact LLM for paper_answers with null impact_evidence
+# (e.g. rows from before the prompt asked for impact_evidence). Use --backfill-impact to enable from CLI.
+# Requires api_type: ucsf_versa. Enabling ensures existing rows get impact_evidence when you run the pipeline.
+backfill_impact_evidence: false
+
+# Thresholds
+min_relevance: 3
+min_match_score: 3
+top_matches_per_paper: 10
+
+# Optional: separate LLM for EC amendment
+# ec_amendment_llm:
+#   endpoint: http://localhost:8000/v1
+#   model: local-model
+
+prompts_file: config/accrual_prompts.json

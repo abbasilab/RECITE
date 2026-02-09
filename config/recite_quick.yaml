@@ -1,0 +1,39 @@
+# Quick test config for recite: coverage over Versa, RAG, and local GPU.
+# Very small num_samples (1–2) so both API paths are exercised before full runs.
+# Run: uv run recite.py run --config config/recite_quick.yaml --backend ucsf_versa
+# Local GPU: uv run recite.py run --config config/recite_quick.yaml --backend local_gpu (skeleton)
+
+num_samples: 2
+
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: true
+
+models:
+  # One Versa model for quick API smoke test
+  - id: versa-4o-mini
+    api_type: ucsf_versa
+    model: gpt-4o-mini-2024-07-18
+    context_window: 128000
+  # One local endpoint model (run_local_gpu is a skeleton; config format supports it)
+  - id: local-test
+    api_type: endpoint
+    model: local-model
+    endpoint: http://localhost:8000/v1
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: default   # default = BLEU/ROUGE/edit only (faster than llm_judge for quick test)
+two_step: false
+batch_size: 2
+top_k: 10
+max_parallel_runs: 1
+wait_for_revive_seconds: 0
+
+parquet_paths:
+  train: data/benchmark_splits/train.parquet
+  val: data/benchmark_splits/val.parquet
+  test: data/benchmark_splits/test.parquet
+

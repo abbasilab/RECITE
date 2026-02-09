@@ -1,0 +1,9 @@
+{
+  "nct_id": "NCT00000001",
+  "title": "A Phase III Study of Experimental Drug X in Adults with Type 2 Diabetes",
+  "original_ec": "Inclusion Criteria:\n- Age 18 to 65 years\n- Diagnosed with Type 2 Diabetes for at least 1 year\n- HbA1c between 7.0% and 10.0%\n- BMI between 25 and 40 kg/m2\n\nExclusion Criteria:\n- History of severe hypoglycemia in the past 6 months\n- eGFR < 60 mL/min/1.73m2\n- Active liver disease",
+  "revised_ec": "Inclusion Criteria:\n- Age 18 to 75 years\n- Diagnosed with Type 2 Diabetes for at least 1 year\n- HbA1c between 7.0% and 11.0%\n- BMI between 22 and 45 kg/m2\n\nExclusion Criteria:\n- History of severe hypoglycemia in the past 6 months\n- eGFR < 45 mL/min/1.73m2\n- Active liver disease",
+  "amendment_date": "2024-03-15",
+  "version_from": 2,
+  "version_to": 3
+}
