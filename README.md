@@ -58,7 +58,3 @@ tests/fixtures/              # Synthetic trial, protocol, paper data
   year   = {2026}
 }
 ```
-
-## License
-
-MIT — see [LICENSE](LICENSE).
