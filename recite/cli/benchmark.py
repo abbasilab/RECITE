@@ -884,6 +884,11 @@ def run_benchmark(
         "--judge-model-type",
         help="Judge model type for UCSF Versa API: '4o' (default, gpt-4o-2024-08-06), '4o-mini', '4.5-preview', or full model name"
     ),
+    confirm_paid_judge: bool = typer.Option(
+        False,
+        "--confirm-paid-judge",
+        help="REQUIRED when using paid judge APIs (ucsf_versa). Acknowledges that judge calls cost real money. Without this flag, paid judge runs will abort with a cost warning."
+    ),
     judge_endpoint: Optional[str] = typer.Option(
         None,
         "--judge-endpoint",
@@ -1078,7 +1083,22 @@ def run_benchmark(
     evaluator_config = None
     if evaluator_type == "llm_judge":
         from recite.llmapis import UCSFVersaAPI
-        
+
+        # Cost guard: paid judge APIs require explicit acknowledgment
+        if judge_api_type == "ucsf_versa" and not confirm_paid_judge:
+            logger.error(
+                "\n"
+                "╔══════════════════════════════════════════════════════════════╗\n"
+                "║  COST WARNING: LLM judge uses UCSF Versa (paid GPT-4o).    ║\n"
+                "║  Estimated cost: ~$30-60 per 3K samples.                    ║\n"
+                "║                                                             ║\n"
+                "║  To proceed, add: --confirm-paid-judge                      ║\n"
+                "║  For free local judge, use: --judge-api-type endpoint       ║\n"
+                "║  To skip judging entirely, use: --evaluator default         ║\n"
+                "╚══════════════════════════════════════════════════════════════╝"
+            )
+            raise typer.Exit(code=1)
+
         if judge_api_type == "ucsf_versa":
             # UCSF Versa API judge
             # Map short model type names to full model names

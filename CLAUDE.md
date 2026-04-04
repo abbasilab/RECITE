@@ -48,6 +48,15 @@ tests/fixtures/             # Synthetic trial, protocol, paper data
 - `.env` — `OPENAI_API_KEY` (or UCSF Versa credentials)
 - Python 3.12+, managed with `uv`
 
+## COST WARNING — PAID API USAGE
+
+The LLM-as-judge evaluation uses UCSF Versa (GPT-4o) which costs real money (~$30-60 per 3K samples). **DO NOT run paid judge evaluations without explicit user approval.**
+
+- The CLI requires `--confirm-paid-judge` flag to run `ucsf_versa` judge
+- For free alternatives: use `--judge-api-type endpoint` with a local model (e.g., Ollama/vLLM)
+- To skip judging: use `--evaluator default` (only computes BLEU/ROUGE/edit distance)
+- Predictions (model inference) are free when using local/Abbasi GPUs
+
 ## Conventions
 
 - Always use `uv run` for Python execution
