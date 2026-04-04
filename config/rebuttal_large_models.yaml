@@ -1,0 +1,37 @@
+# Rebuttal: Large model evaluation (Reviewer Yns9)
+# Llama-3.1-70B-Instruct via vLLM on abbasi-gpu-1
+
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  embed_local_model: BAAI/bge-small-en-v1.5
+  embed_device_index: cpu
+  embed_device_query: cpu
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: true
+
+models:
+  - id: vllm-llama-70b
+    api_type: endpoint
+    model: meta-llama/Llama-3.1-70B-Instruct
+    endpoint: http://localhost:8100/v1
+    context_window: 8192
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: llm_judge
+two_step: false
+batch_size: 10
+top_k: 10
+wait_for_revive_seconds: 30
+
+# WARNING: judge calls use UCSF Versa (GPT-4o) which costs real money.
+# For 3,116 samples, expect ~$30-60 in API costs.
+# Get explicit approval before running judge. Consider --skip-judge for predictions only.
+judge_api_type: ucsf_versa
+judge_model_type: "4o"
+
+from_db: false
+parquet_paths:
+  benchmark: data/benchmark_splits/benchmark.parquet
+splits_to_run: [benchmark]
