@@ -2,7 +2,7 @@
 
 **Revising Eligibility Criteria Incorporating Textual Evidence** — public-facing benchmark package. Automates discovery, extraction, and implementation of evidence-based eligibility criteria revisions for clinical trials.
 
-Note: This is the clean public release repo. Active development happens in `/home/rro/Projects/clintriaLM/`.
+Note: This is the clean public release repo.
 
 ## Quick Start
 
@@ -52,4 +52,4 @@ tests/fixtures/             # Synthetic trial, protocol, paper data
 
 - Always use `uv run` for Python execution
 - Test markers: `@pytest.mark.e2e`, `@pytest.mark.slow`
-- MIT licensed
+- CC BY-NC-SA 4.0 licensed

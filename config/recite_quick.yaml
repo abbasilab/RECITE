@@ -33,7 +33,5 @@ max_parallel_runs: 1
 wait_for_revive_seconds: 0
 
 parquet_paths:
-  train: data/benchmark_splits/train.parquet
-  val: data/benchmark_splits/val.parquet
-  test: data/benchmark_splits/test.parquet
+  benchmark: data/benchmark_splits/benchmark.parquet
 

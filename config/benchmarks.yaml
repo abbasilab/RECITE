@@ -70,4 +70,5 @@ judge_model_type: "4o"
 parquet_paths:
   benchmark: data/benchmark_splits/benchmark.parquet
 splits_to_run: [benchmark]
+from_db: false
 

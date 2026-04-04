@@ -2,52 +2,216 @@
 
 **Revising Eligibility Criteria Incorporating Textual Evidence**
 
-Overly restrictive eligibility criteria contribute to widespread enrollment failure in clinical trials, yet published recommendations for broadening specific criteria remain disconnected from trial design at scale. RECITE automates the discovery, extraction, and implementation of evidence-based eligibility criteria revisions. It constructs an 11,913-instance dataset across 5,735 trials from ClinicalTrials.gov protocol amendments, benchmarks 8 LLM configurations (best: 85.8% binary equivalence with GPT-4o-mini; best open-weight: 84.7% with Gemma 2 9B), and includes an agentic literature discovery system that identifies 44 paper–trial matches with estimated enrollment gains of 25–246%.
+Overly restrictive eligibility criteria contribute to widespread enrollment failure in clinical trials, yet published recommendations for broadening specific criteria remain disconnected from trial design at scale. RECITE automates the discovery, extraction, and implementation of evidence-based eligibility criteria revisions. It constructs an 11,913-instance dataset across 5,735 trials from ClinicalTrials.gov protocol amendments, benchmarks 8 LLM configurations (best: 85.8% binary equivalence with GPT-4o-mini; best open-weight: 84.7% with Gemma 2 9B), and includes an agentic literature discovery system that identifies 44 paper-trial matches with estimated enrollment gains of 25-246%.
 
 ## Pipeline
 
 ```
-1. Benchmark Construction   →  EC diff detection across trial versions
-2. Literature Crawl         →  Agentic paper discovery + relevance scoring
-3. Directive Extraction     →  Extract modification directives from papers
-4. Accrual Scoring          →  Match papers to trials, estimate enrollment gains
+1. Benchmark Construction   ->  EC diff detection across trial versions
+2. Literature Crawl         ->  Agentic paper discovery + relevance scoring
+3. Directive Extraction     ->  Extract modification directives from papers
+4. Accrual Scoring          ->  Match papers to trials, estimate enrollment gains
 ```
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
+- An OpenAI API key (for LLM-as-judge evaluation and model inference)
+- (Optional) GPU with CUDA support for local open-weight models
+
+### Installation
+
 ```bash
-# Install
+git clone https://github.com/russro/RECITE.git
+cd RECITE
+
+# Install dependencies
 uv sync
 
-# With RAG support (optional)
+# With RAG support (optional, for retrieval-augmented generation)
 uv sync --extra rag
 
-# Configure
-cp .env.example .env   # then add your OPENAI_API_KEY
+# Configure environment
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY
+```
 
-# Run pipeline steps
-uv run python init_recite_benchmark.py --help   # Step 1: benchmark construction
-uv run recite crawl --help                      # Step 2: literature crawl
-uv run python accrual.py --help                 # Step 3: accrual scoring
+### Run Tests
 
-# Tests (synthetic fixtures, no API keys needed)
+```bash
+# Unit tests use synthetic fixtures - no API keys needed
 uv run pytest -q
 ```
 
-## Structure
+## Benchmark Data
+
+The `data/benchmark_splits/benchmark.parquet` file contains the **3,116-sample evaluation set** used in the paper (2,492 train / 311 val / 313 test). Each row contains:
+
+| Column | Description |
+|--------|-------------|
+| `id` | Unique instance ID |
+| `instance_id` | ClinicalTrials.gov trial identifier |
+| `source_version` | Source version number (0-indexed) |
+| `target_version` | Target version number |
+| `source_text` | Original eligibility criteria text |
+| `evidence` | Protocol amendment document text (evidence for the revision) |
+| `reference_text` | Ground-truth revised eligibility criteria |
+| `quality_score` | Evidence extraction quality score |
+| `split` | Dataset split (train/val/test) |
+
+### Regenerating the Benchmark from ClinicalTrials.gov
+
+To reconstruct the dataset from scratch (downloads amendment documents from ClinicalTrials.gov):
+
+```bash
+# Initialize database and discover trials with eligibility criteria amendments
+uv run python init_recite_benchmark.py --workers 4 --num-chunks 10 --chunks 0,1,2,3,4,5,6,7,8,9
+
+# Check pipeline status
+uv run python init_recite_benchmark.py --status
+
+# Export to parquet
+uv run python recite.py export-splits --db-path data/dev/recite.db --output-dir data/benchmark_splits
+```
+
+Note: Full reconstruction requires downloading protocol PDFs from ClinicalTrials.gov and takes several hours depending on network speed and rate limits.
+
+## Reproducing the Benchmark Evaluation
+
+### Step 1: Run Model Predictions
+
+The benchmark evaluates models on the task of predicting amended eligibility criteria given the original criteria and evidence from protocol amendments.
+
+```bash
+# Run with the default config (all models from the paper)
+uv run python recite.py run \
+  --config config/benchmarks.yaml \
+  --backend ucsf_versa \
+  --no-from-db \
+  --parquet-dir data/benchmark_splits
+
+# Run with OpenAI-compatible API (e.g., GPT-4o-mini)
+# Edit config/benchmarks.yaml to set api_type: openai and your model
+uv run python recite.py run \
+  --config config/benchmarks.yaml \
+  --backend ucsf_versa \
+  --phase predict
+
+# Run local GPU models (requires CUDA)
+uv run python recite.py run \
+  --config config/benchmarks.yaml \
+  --backend local_gpu \
+  --phase predict
+```
+
+### Step 2: Run LLM-as-Judge Evaluation
+
+After predictions are generated, run the LLM judge to score them:
+
+```bash
+# Run judge evaluation on stored predictions
+uv run python recite.py run \
+  --config config/benchmarks.yaml \
+  --backend ucsf_versa \
+  --phase judge \
+  --judge-batch-size 10
+```
+
+### Step 3: View Results
+
+```bash
+# Print benchmark summary table
+uv run python recite.py benchmark-summary --results-db data/dev/results.db
+```
+
+### Quick Smoke Test
+
+To verify the pipeline works before a full run:
+
+```bash
+uv run python recite.py run \
+  --config config/recite_quick.yaml \
+  --backend ucsf_versa \
+  --no-from-db
+```
+
+## LLM-as-Judge Evaluation
+
+The judge prompt template is in `config/benchmark_prompts.json` under the `judge_prompt` key. The judge evaluates each prediction against the ground truth on two scales:
+
+- **Binary score** (0 or 1): Is the prediction correct?
+- **Ordinal score** (0-4): Quality of match
+  - 0 = No match (unrelated or contradicts target)
+  - 1 = Poor match (minimal overlap, major errors)
+  - 2 = Partial match (some key elements correct, notable gaps)
+  - 3 = Good match (most elements correct, minor differences)
+  - 4 = Excellent match (essentially identical)
+
+A batched variant (`judge_prompt_batched`) scores multiple pairs per API call for efficiency.
+
+## Model Configurations
+
+Models evaluated in the paper are defined in `config/benchmarks.yaml`:
+
+| Model ID | Type | Model |
+|----------|------|-------|
+| `versa-4o` | API | GPT-4o (2024-08-06) |
+| `versa-4o-mini` | API | GPT-4o-mini (2024-07-18) |
+| `local-qwen-0.5b` | Local GPU | Qwen2.5-0.5B-Instruct |
+| `local-qwen-3b` | Local GPU | Qwen2.5-3B-Instruct |
+| `local-qwen-7b` | Local GPU | Qwen2.5-7B-Instruct |
+| `local-gemma2-2b` | Local GPU | Gemma-2-2B-IT |
+| `local-gemma2-9b` | Local GPU | Gemma-2-9B-IT |
+| `local-longctx-7b` | Local GPU | DeepSeek-R1-Distill-Qwen-7B |
+
+Additional model presets for vLLM serving are in `config/model_presets.yaml`.
+
+## Project Structure
 
 ```
 recite/                      # Core package
-├── benchmark/               # EC diff, triplet building, evaluation
-├── crawler/                 # Literature crawl (PubMed, Semantic Scholar)
-├── accrual/                 # Directive extraction, impact scoring
-├── rag/                     # RAG-based evidence retrieval (optional)
-├── cli/                     # Typer CLI (benchmark, crawl)
-├── utils/                   # Logging, path resolution
-└── llmapis.py               # LLM API wrappers
+  benchmark/                 # EC diff, triplet building, evaluation
+  crawler/                   # Literature crawl (PubMed, Semantic Scholar)
+  accrual/                   # Directive extraction, impact scoring
+  rag/                       # RAG-based evidence retrieval (optional)
+  cli/                       # Typer CLI (benchmark, crawl)
+  utils/                     # Logging, path resolution
+  llmapis.py                 # LLM API wrappers
 config/                      # YAML/JSON configs and prompt templates
+  benchmarks.yaml            # Full benchmark config (all models)
+  benchmark_prompts.json     # Prompt templates including LLM judge
+  model_presets.yaml         # vLLM model serving presets
+data/
+  benchmark_splits/          # Parquet evaluation data (3,116 instances)
 tests/fixtures/              # Synthetic trial, protocol, paper data
 ```
+
+## Key Entry Points
+
+| File | Purpose |
+|------|---------|
+| `recite.py` | Benchmark runner: `run`, `ready`, `export-splits`, `benchmark-summary` |
+| `init_recite_benchmark.py` | Benchmark construction from ClinicalTrials.gov |
+| `accrual.py` | Accrual impact scoring pipeline |
+| CLI: `recite crawl` | Literature discovery and relevance scoring |
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key for LLM calls and judge |
+| `LOCAL_DB_DIR` | No | Database directory (default: `data/dev`) |
+| `HF_HOME` | No | HuggingFace model cache directory |
+| `UCSF_API_KEY` | No | UCSF Versa institutional API key |
+| `UCSF_API_VER` | No | Azure API version for UCSF Versa |
+| `UCSF_RESOURCE_ENDPOINT` | No | UCSF Versa endpoint URL |
+
+## License
+
+This work is licensed under [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
 ## Citation
 
