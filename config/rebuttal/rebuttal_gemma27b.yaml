@@ -1,8 +1,14 @@
-# REBUTTAL: Gemma 2 27B evaluation (python_gpu)
+# REBUTTAL: Gemma 2 27B evaluation via vLLM
 # Completes Gemma scaling story: 2B → 9B → 27B
 #
+# Prerequisites: Start a vLLM server on 4 GPUs:
+#   CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve google/gemma-2-27b-it \
+#     --tensor-parallel-size 4 --max-model-len 8192 \
+#     --dtype bfloat16 --port 8200 --enforce-eager
+#
 # Usage:
-#   uv run python -m recite.cli.benchmark run-benchmark --config config/rebuttal_gemma27b.yaml
+#   uv run python -m recite.cli.benchmark run-benchmark \
+#     --config config/rebuttal/rebuttal_gemma27b.yaml
 
 rag:
   embed_base_url: ""
@@ -17,17 +23,18 @@ rag:
 
 models:
   - id: gemma2-27b
-    api_type: python_gpu
+    api_type: endpoint
     model: google/gemma-2-27b-it
-    gpus: 4
+    endpoint: http://localhost:8200/v1
     context_window: 8192
 
 prompts_file: config/benchmark_prompts.json
 evaluator_type: default
 two_step: false
-batch_size: 1
+batch_size: 50
 top_k: 10
-wait_for_revive_seconds: 30
+wait_for_revive_seconds: 60
+max_concurrent_requests: 10
 
 from_db: false
 parquet_paths:

@@ -32,6 +32,6 @@ top_k: 10
 wait_for_revive_seconds: 0
 
 parquet_paths:
-  benchmark: data/benchmark_splits/benchmark.parquet
-splits_to_run: [benchmark]
+  train: data/benchmark_splits/benchmark.parquet
 from_db: false
+num_samples: 10

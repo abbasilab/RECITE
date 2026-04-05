@@ -81,61 +81,70 @@ Note: Full reconstruction requires downloading protocol PDFs from ClinicalTrials
 
 ## Reproducing the Benchmark Evaluation
 
-### Step 1: Run Model Predictions
+### Original Paper Models (single GPU, HuggingFace Transformers)
 
-The benchmark evaluates models on the task of predicting amended eligibility criteria given the original criteria and evidence from protocol amendments.
+The 8 models in the paper (Qwen 0.5B–7B, Gemma 2B–9B, Mistral 7B, DeepSeek-R1 7B) each fit on a single GPU and use the `python_gpu` backend (HuggingFace Transformers `generate()`):
 
 ```bash
-# Run with the default config (all models from the paper)
-uv run python recite.py run \
-  --config config/benchmarks.yaml \
-  --backend ucsf_versa \
-  --no-from-db \
-  --parquet-dir data/benchmark_splits
+# Run all original models (requires 1x GPU with ≥32GB VRAM)
+uv run python -m recite.cli.benchmark run-benchmark \
+  --config config/benchmarks.yaml
 
-# Run with OpenAI-compatible API (e.g., GPT-4o-mini)
-# Edit config/benchmarks.yaml to set api_type: openai and your model
-uv run python recite.py run \
-  --config config/benchmarks.yaml \
-  --backend ucsf_versa \
-  --phase predict
-
-# Run local GPU models (requires CUDA)
-uv run python recite.py run \
-  --config config/benchmarks.yaml \
-  --backend local_gpu \
-  --phase predict
+# Quick smoke test (10 samples, 2 models)
+uv run python -m recite.cli.benchmark run-benchmark \
+  --config config/recite_quick.yaml
 ```
 
-### Step 2: Run LLM-as-Judge Evaluation
+API models (GPT-4o, GPT-4o-mini) require a UCSF Versa or OpenAI API key in `.env`.
 
-After predictions are generated, run the LLM judge to score them:
+### Rebuttal Models (multi-GPU, vLLM)
+
+Larger rebuttal models (Gemma-2 27B, Qwen2.5 72B, Llama-3.1 70B, Qwen3 32B) require multi-GPU inference via [vLLM](https://docs.vllm.ai/) tensor parallelism:
 
 ```bash
-# Run judge evaluation on stored predictions
-uv run python recite.py run \
-  --config config/benchmarks.yaml \
-  --backend ucsf_versa \
-  --phase judge \
-  --judge-batch-size 10
+# 1. Install vLLM (requires CUDA 12.1+)
+pip install vllm
+
+# 2. Start a vLLM server (example: Gemma-2 27B on 4 GPUs)
+CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve google/gemma-2-27b-it \
+  --tensor-parallel-size 4 --max-model-len 8192 \
+  --dtype bfloat16 --port 8200
+
+# 3. Run the benchmark against the vLLM endpoint
+uv run python -m recite.cli.benchmark run-benchmark \
+  --config config/rebuttal/rebuttal_gemma27b.yaml
 ```
 
-### Step 3: View Results
+Each rebuttal model has its own config with vLLM server instructions:
+
+| Config | Model | GPUs | vLLM Port |
+|--------|-------|------|-----------|
+| `config/rebuttal/rebuttal_gemma27b.yaml` | Gemma-2 27B | 4 | 8200 |
+| `config/rebuttal/rebuttal_qwen72b.yaml` | Qwen2.5 72B | 8 | 8300 |
+| `config/rebuttal/rebuttal_llama70b.yaml` | Llama-3.1 70B | 4-8 | 8100 |
+| `config/rebuttal/rebuttal_qwen32b.yaml` | Qwen3 32B | 4 | 8100 |
+
+### View Results
 
 ```bash
-# Print benchmark summary table
-uv run python recite.py benchmark-summary --results-db data/dev/results.db
+# Generate markdown summary from prediction outputs
+uv run python -m recite.cli.benchmark summarize \
+  --predictions-dir data/benchmark_predictions
 ```
 
-### Quick Smoke Test
+### Reproduction Validation
 
-To verify the pipeline works before a full run:
+Tools in `reproduce/` verify that reproduced results match original outputs:
 
 ```bash
-uv run python recite.py run \
-  --config config/recite_quick.yaml \
-  --backend ucsf_versa \
-  --no-from-db
+# Run a small reproduction check (10 samples, 2 models)
+uv run python -m recite.cli.benchmark run-benchmark \
+  --config reproduce/reproduce_originals.yaml --num-samples 10
+
+# Compare reproduced predictions against original database
+uv run python reproduce/compare_predictions.py \
+  --original-db data/results/benchmark_results_cluster1.db \
+  --predictions-dir data/benchmark_predictions
 ```
 
 ## LLM-as-Judge Evaluation
