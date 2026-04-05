@@ -20,3 +20,4 @@ reports/
 dumps/
 *.log
 .DS_Store
+data/results/
