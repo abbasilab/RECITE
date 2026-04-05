@@ -16,7 +16,7 @@ models:
     api_type: endpoint
     model: meta-llama/Llama-3.1-70B-Instruct
     endpoint: http://localhost:8100/v1
-    context_window: 8192
+    context_window: 131072
 
 prompts_file: config/benchmark_prompts.json
 evaluator_type: llm_judge

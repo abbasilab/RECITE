@@ -1,0 +1,34 @@
+# REBUTTAL: Qwen2.5-72B evaluation (python_gpu, AWQ-INT4)
+# Completes Qwen scaling story: 0.5B → 3B → 7B → 72B
+#
+# Usage:
+#   uv run python -m recite.cli.benchmark run-benchmark --config config/rebuttal_qwen72b.yaml
+
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  embed_local_model: BAAI/bge-small-en-v1.5
+  embed_device_index: cpu
+  embed_device_query: cpu
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: true
+  sweep_rag: false
+
+models:
+  - id: qwen25-72b
+    api_type: python_gpu
+    model: Qwen/Qwen2.5-72B-Instruct
+    gpus: 8
+    context_window: 32768
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: default
+two_step: false
+batch_size: 1
+top_k: 10
+wait_for_revive_seconds: 30
+
+from_db: false
+parquet_paths:
+  train: data/benchmark_splits/benchmark.parquet

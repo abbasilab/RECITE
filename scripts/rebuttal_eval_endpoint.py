@@ -93,9 +93,14 @@ async def call_endpoint(
 ) -> str:
     """Call OpenAI-compatible endpoint."""
     messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": user_prompt})
+    # Gemma models don't support system role — merge into user message
+    if "gemma" in model.lower():
+        combined = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        messages.append({"role": "user", "content": combined})
+    else:
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
 
     # Estimate token count (~4 chars/token) and cap max_tokens
     est_input_tokens = sum(len(m["content"]) for m in messages) // 4
@@ -103,14 +108,18 @@ async def call_endpoint(
 
     for attempt in range(3):
         try:
-            resp = await client.post(
-                f"{endpoint}/chat/completions",
-                json={
+            payload = {
                     "model": model,
                     "messages": messages,
                     "temperature": temperature,
                     "max_tokens": effective_max_tokens,
-                },
+                }
+            # Disable thinking for Qwen3 models
+            if "qwen3" in model.lower() or "Qwen3" in model:
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
+            resp = await client.post(
+                f"{endpoint}/chat/completions",
+                json=payload,
                 timeout=timeout,
             )
             if resp.status_code == 200:
@@ -203,6 +212,8 @@ async def run_predictions(
     max_concurrent: int = 16,
     max_tokens: int = 2048,
     use_ollama: bool = False,
+    timeout: float = 300.0,
+    max_context: int = 8192,
 ) -> list[dict]:
     """Run predictions concurrently on all samples."""
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -221,7 +232,8 @@ async def run_predictions(
                     else:
                         prediction = await call_endpoint(
                             client, endpoint, model, sys_prompt, user_prompt,
-                            max_tokens=max_tokens,
+                            max_tokens=max_tokens, timeout=timeout,
+                            max_context=max_context,
                         )
                 except Exception as e:
                     prediction = f"[ERROR] {type(e).__name__}: {e}"
@@ -423,6 +435,8 @@ async def main():
     parser.add_argument("--judge-concurrent", type=int, default=8, help="Max concurrent judge batches")
     parser.add_argument("--judge-batch-size", type=int, default=10)
     parser.add_argument("--max-tokens", type=int, default=2048, help="Max tokens for generation")
+    parser.add_argument("--timeout", type=float, default=300.0, help="Timeout per request in seconds")
+    parser.add_argument("--max-context", type=int, default=8192, help="Max context window for token capping")
     parser.add_argument("--no-rag", action="store_true", default=True)
     parser.add_argument("--skip-judge", action="store_true", help="Skip judge evaluation")
     parser.add_argument("--use-ollama", action="store_true", help="Use Ollama native API (for Qwen3 think=false)")
@@ -450,6 +464,8 @@ async def main():
         max_concurrent=args.max_concurrent,
         max_tokens=args.max_tokens,
         use_ollama=args.use_ollama,
+        timeout=args.timeout,
+        max_context=args.max_context,
     )
     t_pred = time.time() - t0
     n_errors = sum(1 for r in results if r.get("is_error"))

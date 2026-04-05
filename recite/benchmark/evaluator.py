@@ -1277,27 +1277,29 @@ def run_single_sample(
                     tokenizer.model_max_length or 131072,
                     ctx_tokens,
                 )
-                try:
-                    prompt_ids = tokenizer.apply_chat_template(
-                        messages,
+                def _apply_template_ids(msgs):
+                    """Apply chat template and return input_ids tensor (handles BatchEncoding in transformers>=5)."""
+                    result = tokenizer.apply_chat_template(
+                        msgs,
                         add_generation_prompt=True,
                         return_tensors="pt",
                         truncation=True,
                         max_length=max_len,
                     )
+                    # transformers >=5 returns BatchEncoding; older versions return a raw tensor
+                    if hasattr(result, "keys") and "input_ids" in result:
+                        return result["input_ids"]
+                    return result
+
+                try:
+                    prompt_ids = _apply_template_ids(messages)
                 except Exception as template_err:
                     # Gemma 2 and some other models don't support "system" in chat template
                     if "system" in str(template_err).lower() or "TemplateError" in type(template_err).__name__:
                         messages_user_only = [
                             {"role": "user", "content": f"{system_prompt}\n\n{user_content}".strip() if system_prompt else user_content},
                         ]
-                        prompt_ids = tokenizer.apply_chat_template(
-                            messages_user_only,
-                            add_generation_prompt=True,
-                            return_tensors="pt",
-                            truncation=True,
-                            max_length=max_len,
-                        )
+                        prompt_ids = _apply_template_ids(messages_user_only)
                     else:
                         logger.warning(f"python_gpu generate failed: {template_err}")
                         raise
@@ -1554,6 +1556,95 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
                 ucsf_versa_model=ucsf_versa_model,
             )
+    elif isinstance(model, dict) and model.get("api_type") == "python_gpu" and "model" in model:
+        # In-process GPU model via Hugging Face Transformers (PyTorch)
+        import torch
+        model_name = model["model"]
+        device = model.get("device", "cuda")
+        gpu_ids = model.get("gpu_ids")
+        gpus = model.get("gpus")
+        if gpu_ids is None and gpus is not None and int(gpus) > 1:
+            gpu_ids = list(range(int(gpus)))
+        hf_model, tokenizer = _get_python_gpu_model(model_name, device, gpu_ids=gpu_ids)
+        context_window = model.get("context_window")
+        ctx_tokens = int(context_window) if context_window is not None else 131072
+        no_rag_max_tokens = model.get("no_rag_max_tokens")
+        if no_rag_max_tokens is None and context_window is not None:
+            no_rag_max_tokens = max(0, ctx_tokens - 4096)
+        if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+            no_rag_max_tokens = 512
+        no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+        is_endpoint = False
+
+        def model_callable(
+            source_text: str,
+            evidence: str,
+            source_version: Optional[int] = None,
+            target_version: Optional[int] = None,
+        ) -> str:
+            global _PYTHON_GPU_GENERATE_LOG_COUNT
+            has_document = evidence is not None and bool(evidence.strip())
+            user_prompt = _format_model_prompt(
+                source_text, prompts.model_prompt,
+                has_document=has_document, source_version=source_version, target_version=target_version,
+            )
+            system_prompt = prompts.model_prompt.get("system", "")
+            if evidence and evidence.strip():
+                ev = evidence.strip()
+                enc = tokenizer.encode(ev)
+                if len(enc) > no_rag_max_tokens:
+                    ev = tokenizer.decode(enc[:no_rag_max_tokens])
+                user_content = f"{user_prompt}\n\nSupporting evidence:\n{ev}"
+            else:
+                user_content = user_prompt
+            system_prompt = (system_prompt or "").strip()
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ]
+            max_len = min(
+                tokenizer.model_max_length or 131072,
+                ctx_tokens,
+            )
+            def _apply_template_ids(msgs):
+                result = tokenizer.apply_chat_template(
+                    msgs, add_generation_prompt=True, return_tensors="pt",
+                    truncation=True, max_length=max_len,
+                )
+                if hasattr(result, "keys") and "input_ids" in result:
+                    return result["input_ids"]
+                return result
+
+            try:
+                prompt_ids = _apply_template_ids(messages)
+            except Exception as template_err:
+                if "system" in str(template_err).lower() or "TemplateError" in type(template_err).__name__:
+                    messages_user_only = [
+                        {"role": "user", "content": f"{system_prompt}\n\n{user_content}".strip() if system_prompt else user_content},
+                    ]
+                    prompt_ids = _apply_template_ids(messages_user_only)
+                else:
+                    raise
+            seq_len = prompt_ids.shape[1]
+            if seq_len > max_len:
+                prompt_ids = prompt_ids[:, -max_len:]
+            prompt_ids = prompt_ids.to(hf_model.device)
+            attention_mask = prompt_ids.new_ones(prompt_ids.shape, dtype=torch.long)
+            n = _PYTHON_GPU_GENERATE_LOG_COUNT
+            if n < 8:
+                logger.info("python_gpu: generate start (prompt_len={}, call#={})", prompt_ids.shape[1], n + 1)
+            out = hf_model.generate(
+                prompt_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=2048,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id,
+            )
+            _PYTHON_GPU_GENERATE_LOG_COUNT = n + 1
+            if n < 8:
+                logger.info("python_gpu: generate done (out_len={}, call#={})", out.shape[1], n + 1)
+            gen = out[0][prompt_ids.shape[1]:]
+            return tokenizer.decode(gen, skip_special_tokens=True).strip()
     elif isinstance(model, dict) and "endpoint" in model and "model" in model:
         endpoint = model["endpoint"]
         llm_model = model["model"]
@@ -1603,7 +1694,7 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
     else:
-        raise ValueError("model must be either a callable or a dict with 'endpoint' and 'model' keys")
+        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'ucsf_versa'")
     
     # Load parquet files
     splits = {}
@@ -1904,11 +1995,12 @@ def run_benchmark(
                         _save_predictions_checkpoint(predictions, output_dir, split_name)
                 except Exception as e:
                     logger.error(
-                        "Error processing sample id=%s instance_id=%s: %s",
+                        "Error processing sample id={} instance_id={}: {}",
                         row.get("id", idx),
                         row.get("instance_id", "?"),
                         e,
                     )
+                    logger.debug("Traceback:\n{}", traceback.format_exc())
                     continue
         else:
             # Chunked parallel path
@@ -1940,9 +2032,12 @@ def run_benchmark(
                     if sid in existing_preds:
                         chunk_predictions.append(existing_preds[sid])
                         chunk_results.append(existing_res[sid])
-                    else:
+                    elif i in results_by_index:
                         chunk_predictions.append(results_by_index[i][0])
                         chunk_results.append(results_by_index[i][1])
+                    else:
+                        # Sample failed in parallel execution; skip
+                        continue
                 predictions.extend(chunk_predictions)
                 results.extend(chunk_results)
                 if chunk_start == 0 and not done_this_run:

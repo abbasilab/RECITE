@@ -337,12 +337,30 @@ class UCSFVersaAPI(AbstractLLMAPI):
 
         logger.info(f"UCSFVersaAPI client initialized for deployment '{model}' at '{self.resource_endpoint}' with API version '{self.api_version}'.")
 
+        # Cost guard: require explicit opt-in for paid API usage
+        self._cost_guard_acknowledged = os.getenv("RECITE_CONFIRM_PAID_API", "").lower() in ("1", "true", "yes")
+        if not self._cost_guard_acknowledged:
+            logger.warning(
+                "\n"
+                "╔══════════════════════════════════════════════════════════════╗\n"
+                "║  COST GUARD: UCSFVersaAPI initialized without opt-in.       ║\n"
+                "║  Set RECITE_CONFIRM_PAID_API=1 to allow paid API calls.     ║\n"
+                "║  Without this, all calls will be blocked with an error.     ║\n"
+                "╚══════════════════════════════════════════════════════════════╝"
+            )
+
     def __call__(
-            self, 
-            prompt: str, 
-            system_prompt: str = None, 
+            self,
+            prompt: str,
+            system_prompt: str = None,
             temperature: float = 0
             ) -> str:
+        if not self._cost_guard_acknowledged:
+            raise RuntimeError(
+                "COST GUARD: UCSFVersaAPI call blocked. This API costs real money "
+                "(~$30-60 per 3K samples). Set environment variable "
+                "RECITE_CONFIRM_PAID_API=1 to acknowledge costs and proceed."
+            )
         if system_prompt is None:
             system_prompt = self.system_prompt
 

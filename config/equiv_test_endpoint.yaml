@@ -1,0 +1,28 @@
+# Equivalence test: Gemma 2 27B via vLLM endpoint
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  embed_local_model: BAAI/bge-small-en-v1.5
+  embed_device_index: cpu
+  embed_device_query: cpu
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: true
+
+models:
+  - id: gemma2-27b-endpoint
+    api_type: endpoint
+    model: google/gemma-2-27b-it
+    endpoint: http://localhost:8100/v1
+    context_window: 8192
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: default
+two_step: false
+batch_size: 1
+top_k: 10
+wait_for_revive_seconds: 30
+
+from_db: false
+parquet_paths:
+  train: data/benchmark_splits/benchmark.parquet

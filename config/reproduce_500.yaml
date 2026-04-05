@@ -1,0 +1,36 @@
+# Reproduction: 500-sample directional check for Qwen-7B and Gemma-9B
+# No RAG, predict only (evaluator: default = no LLM judge)
+rag:
+  embed_base_url: ""
+  embed_model: ""
+  embed_local_model: BAAI/bge-small-en-v1.5
+  embed_device_index: cuda:0
+  embed_device_query: cpu
+  persist_dir: data/llamaindex_cache
+  top_k: 10
+  sweep_no_rag: false
+
+models:
+  - id: local-qwen-7b
+    api_type: python_gpu
+    model: Qwen/Qwen2.5-7B-Instruct
+    gpus: 1
+    context_window: 32768
+  - id: local-gemma2-9b
+    api_type: python_gpu
+    model: google/gemma-2-9b-it
+    gpus: 1
+    context_window: 8192
+
+prompts_file: config/benchmark_prompts.json
+evaluator_type: default
+two_step: false
+batch_size: 10
+top_k: 10
+wait_for_revive_seconds: 0
+num_samples: 500
+
+parquet_paths:
+  benchmark: data/benchmark_splits/benchmark.parquet
+splits_to_run: [benchmark]
+from_db: false

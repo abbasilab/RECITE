@@ -181,6 +181,7 @@ def get_experiment_specs(
     wait_for_revive_seconds = int(bench_config.get("wait_for_revive_seconds", 0))
     top_k_list = _normalize_top_k_list(bench_config.get("top_k"))
     sweep_no_rag = bool((bench_config.get("rag") or {}).get("sweep_no_rag", False))
+    sweep_rag = bool((bench_config.get("rag") or {}).get("sweep_rag", True))
     prompt_version = bench_config.get("prompt_version")
 
     run_started_at = datetime.now(timezone.utc).isoformat()
@@ -255,30 +256,31 @@ def get_experiment_specs(
                 spec_no_rag["config_id"] = compute_config_fingerprint(spec_no_rag)
                 specs.append(spec_no_rag)
 
-            spec_rag = {
-                "model_id": model_id,
-                "model": dict(model),
-                "top_k": k,
-                "no_rag": False,
-                "parquet_paths": parquet_paths_str,
-                "prompts_file": str(prompts_file_path),
-                "prompts_snapshot": prompts_snapshot,
-                "evaluator_type": evaluator_type,
-                "evaluator_config": evaluator_config,
-                "two_step": two_step_val,
-                "batch_size": batch_size,
-                "num_samples": num_samples,
-                "wait_for_revive_seconds": wait_for_revive_seconds,
-                "config_path": str(config_path),
-                "run_started_at": run_started_at,
-                "prompt_version": prompt_version,
-            }
-            if rag_config is not None:
-                spec_rag["rag_config"] = {**rag_config, "no_rag": False, "similarity_top_k": k}
-                spec_rag["model"]["top_k"] = k
-            else:
-                spec_rag["rag_config"] = {"no_rag": False, "similarity_top_k": k}
-            spec_rag["config_id"] = compute_config_fingerprint(spec_rag)
-            specs.append(spec_rag)
+            if sweep_rag:
+                spec_rag = {
+                    "model_id": model_id,
+                    "model": dict(model),
+                    "top_k": k,
+                    "no_rag": False,
+                    "parquet_paths": parquet_paths_str,
+                    "prompts_file": str(prompts_file_path),
+                    "prompts_snapshot": prompts_snapshot,
+                    "evaluator_type": evaluator_type,
+                    "evaluator_config": evaluator_config,
+                    "two_step": two_step_val,
+                    "batch_size": batch_size,
+                    "num_samples": num_samples,
+                    "wait_for_revive_seconds": wait_for_revive_seconds,
+                    "config_path": str(config_path),
+                    "run_started_at": run_started_at,
+                    "prompt_version": prompt_version,
+                }
+                if rag_config is not None:
+                    spec_rag["rag_config"] = {**rag_config, "no_rag": False, "similarity_top_k": k}
+                    spec_rag["model"]["top_k"] = k
+                else:
+                    spec_rag["rag_config"] = {"no_rag": False, "similarity_top_k": k}
+                spec_rag["config_id"] = compute_config_fingerprint(spec_rag)
+                specs.append(spec_rag)
 
     return specs

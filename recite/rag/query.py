@@ -5,6 +5,7 @@ When document is empty, call LLM directly with system + user prompt.
 """
 
 import hashlib
+import re
 import threading
 import time
 from pathlib import Path
@@ -167,6 +168,13 @@ def _doc_id(document: str) -> str:
 # Default max tokens for evidence when no_rag=True (truncate, no retrieval).
 DEFAULT_NO_RAG_MAX_TOKENS = 4096
 
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_thinking_tokens(text: str) -> str:
+    """Strip <think>...</think> blocks from model output (e.g. Qwen3 reasoning mode)."""
+    return _THINK_RE.sub("", text).strip()
+
 
 def build_index_for_document(
     document: str,
@@ -250,23 +258,39 @@ def query_with_rag(
         llm = _VersaLLMAdapter(model=ucsf_versa_model)
     else:
         context_window = llm_context_window if llm_context_window is not None else DEFAULT_LLM_CONTEXT_WINDOW
+        # Disable thinking mode for Qwen3 models (generates <think> tokens that waste throughput)
+        additional_kwargs = {}
+        if llm_model and "qwen3" in llm_model.lower():
+            additional_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         llm = OpenAILike(
             model=llm_model,
             api_base=llm_base_url,
             api_key="fake",
             is_chat_model=True,
             context_window=context_window,
+            timeout=600.0,
+            additional_kwargs=additional_kwargs,
         )
+
+    # Some models (e.g. Gemma) don't support a separate system role via the
+    # OpenAI-compatible API.  Detect these and merge system prompt into user.
+    _no_system_role = bool(llm_model and "gemma" in llm_model.lower()) and not ucsf_versa_model
+
+    def _build_messages(user_content: str) -> list:
+        msgs = []
+        if system_prompt and system_prompt.strip():
+            if _no_system_role:
+                user_content = f"{system_prompt.strip()}\n\n{user_content}"
+            else:
+                msgs.append(ChatMessage(role="system", content=system_prompt))
+        msgs.append(ChatMessage(role="user", content=user_content))
+        return msgs
 
     if not document or not document.strip():
         # Direct LLM call: no RAG
         logger.debug("RAG: document empty, using direct LLM path")
-        messages = []
-        if system_prompt and system_prompt.strip():
-            messages.append(ChatMessage(role="system", content=system_prompt))
-        messages.append(ChatMessage(role="user", content=user_prompt))
-        response = llm.chat(messages)
-        return response.message.content or ""
+        response = llm.chat(_build_messages(user_prompt))
+        return _strip_thinking_tokens(response.message.content or "")
 
     # No-RAG sweep: pass evidence in prompt, truncated to token limit (no retrieval)
     if no_rag:
@@ -277,12 +301,8 @@ def query_with_rag(
         else:
             logger.debug("RAG: no_rag=True; evidence within {} tokens", max_tok)
         user_with_evidence = f"{user_prompt}\n\nSupporting evidence:\n{evidence}"
-        messages = []
-        if system_prompt and system_prompt.strip():
-            messages.append(ChatMessage(role="system", content=system_prompt))
-        messages.append(ChatMessage(role="user", content=user_with_evidence))
-        response = llm.chat(messages)
-        return response.message.content or ""
+        response = llm.chat(_build_messages(user_with_evidence))
+        return _strip_thinking_tokens(response.message.content or "")
 
     # Fallback: document provided but no embed configured (API or local) -> pass full document in prompt
     use_local_embed = bool(
@@ -296,12 +316,8 @@ def query_with_rag(
             "RAG: embed config missing (embed_base_url/embed_model or embed_local_model); passing full document in prompt (no retrieval)"
         )
         user_with_evidence = f"{user_prompt}\n\nSupporting evidence:\n{document}"
-        messages = []
-        if system_prompt and system_prompt.strip():
-            messages.append(ChatMessage(role="system", content=system_prompt))
-        messages.append(ChatMessage(role="user", content=user_with_evidence))
-        response = llm.chat(messages)
-        return response.message.content or ""
+        response = llm.chat(_build_messages(user_with_evidence))
+        return _strip_thinking_tokens(response.message.content or "")
 
     # RAG path: embed config present (API or local).
     # One index per document (doc_id = hash(document)); retrieval is scoped to this document only—
@@ -373,6 +389,7 @@ def query_with_rag(
     response = query_engine.query(query_for_embed)
     _elapsed = time.perf_counter() - _t0
     out = (response.response if hasattr(response, "response") else str(response)) or ""
+    out = _strip_thinking_tokens(out)
     logger.info("RAG: LLM done in %.1fs (response_len=%s)", _elapsed, len(out))
     logger.debug("RAG: query end doc_id={} response_len={}", doc_id[:16], len(out))
     return out

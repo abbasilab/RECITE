@@ -627,7 +627,8 @@ def _find_matching_run_dir(
     """
     project_root = get_project_root()
     parquet_normalized = _normalize_parquet_paths_for_match(parquet_paths_base, project_root)
-    model_dir = out_dir / model_id
+    # out_dir is already model-specific (output_dir / model_id); use it directly
+    model_dir = out_dir
     if not model_dir.is_dir():
         return None
     suffix = "_no_rag" if no_rag else f"_topk{top_k}"
@@ -1038,6 +1039,7 @@ def run_benchmark(
         if ucsf_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
             rag_config["embed_base_url"] = f"{ucsf_endpoint}/openai/deployments/{rag_config['embed_model']}"
     sweep_no_rag = bool(bench_config.get("rag", {}).get("sweep_no_rag", False)) if bench_config else False
+    sweep_rag = bool(bench_config.get("rag", {}).get("sweep_rag", True)) if bench_config else True
     # no_rag_max_tokens is per-model only (context_window - reserved or model.no_rag_max_tokens); no global in config
     no_rag_max_tokens: Optional[int] = None
     wait_for_revive_seconds = int(bench_config.get("wait_for_revive_seconds", 0)) if bench_config else 0
@@ -1265,6 +1267,22 @@ def run_benchmark(
             two_step_m = m.get("two_step")
             if two_step_m is None and bench_config:
                 two_step_m = bench_config.get("two_step", False)
+        elif api_type == "python_gpu":
+            if not mod:
+                logger.warning(f"Skipping model entry missing model (python_gpu): {m}")
+                continue
+            model_id = _sanitize_model_id(m.get("id", mod))
+            out_dir = output_dir / model_id
+            model = {"api_type": "python_gpu", "model": mod}
+            if m.get("context_window") is not None:
+                model["context_window"] = int(m["context_window"])
+            if m.get("no_rag_max_tokens") is not None:
+                model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
+            model["device"] = m.get("device", "cuda")
+            model["gpus"] = int(m.get("gpus", 1))
+            two_step_m = m.get("two_step")
+            if two_step_m is None and bench_config:
+                two_step_m = bench_config.get("two_step", False)
         else:
             ep = m.get("endpoint")
             if not ep or not mod:
@@ -1322,27 +1340,28 @@ def run_benchmark(
                     "sweep_no_rag": True,
                     "max_concurrent_requests": _max_concurrent_requests,
                 })
-            multi_specs.append({
-                "model": model,
-                "k": k,
-                "out_dir": out_dir,
-                "run_config_base": run_config_base,
-                "parquet_paths_base": parquet_paths_base,
-                "evaluator_type": evaluator_type,
-                "evaluator_config": evaluator_config,
-                "batch_size": batch_size,
-                "num_samples": num_samples,
-                "prompts_file": prompts_file,
-                "two_step_val": two_step_val,
-                "rag_config": rag_config,
-                "wait_for_revive_seconds": wait_for_revive_seconds,
-                "e2e_smoke": e2e_smoke,
-                "cfg_path": cfg_path,
-                "no_rag": False,
-                "no_rag_max_tokens": no_rag_max_m,
-                "sweep_no_rag": sweep_no_rag,
-                "max_concurrent_requests": _max_concurrent_requests,
-            })
+            if sweep_rag:
+                multi_specs.append({
+                    "model": model,
+                    "k": k,
+                    "out_dir": out_dir,
+                    "run_config_base": run_config_base,
+                    "parquet_paths_base": parquet_paths_base,
+                    "evaluator_type": evaluator_type,
+                    "evaluator_config": evaluator_config,
+                    "batch_size": batch_size,
+                    "num_samples": num_samples,
+                    "prompts_file": prompts_file,
+                    "two_step_val": two_step_val,
+                    "rag_config": rag_config,
+                    "wait_for_revive_seconds": wait_for_revive_seconds,
+                    "e2e_smoke": e2e_smoke,
+                    "cfg_path": cfg_path,
+                    "no_rag": False,
+                    "no_rag_max_tokens": no_rag_max_m,
+                    "sweep_no_rag": sweep_no_rag,
+                    "max_concurrent_requests": _max_concurrent_requests,
+                })
 
     logger.info("=" * 80)
     logger.info(f"Running {len(multi_specs)} benchmark run(s) (max_parallel_runs={_max_parallel_runs})")
