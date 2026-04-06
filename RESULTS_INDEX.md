@@ -51,15 +51,14 @@ Stored in `data/rebuttal/` as consolidated JSON files. These **are tracked in gi
 
 | File | HF Model | Params | n_samples | n_errors | `binary_equiv` | `mean_ordinal` | n_judged | Timestamp |
 |------|----------|--------|-----------|----------|----------------|----------------|----------|-----------|
-| `gemma2-27b_no_rag.json` | google/gemma-2-27b-it | 27B | 3116 | 0 | — (pending) | — | — | 2026-04-05T12:08Z |
+| `gemma2-27b_no_rag.json` | google/gemma-2-27b-it | 27B | 3116 | 0 | **0.463** | 2.964 | 3116 | 2026-04-05T12:08Z |
 | `llama31_70b_no_rag.json` | meta-llama/Llama-3.1-70B-Instruct | 70B | 3116 | 296 | **0.422** | 3.056 | 2820 | 2026-04-04T11:32Z |
-| `qwen25-72b_no_rag.json` | Qwen/Qwen2.5-72B-Instruct | 72B | 3116 | 0 | — (pending) | — | — | 2026-04-05T14:03Z |
+| `qwen25-72b_no_rag.json` | Qwen/Qwen2.5-72B-Instruct | 72B | 3116 | 0 | **0.505** | 3.216 | 3116 | 2026-04-05T14:03Z |
 | `qwen3_32b_no_rag.json` | Qwen/Qwen3-32B | 32B | 3116 | 577 | **0.432** | 3.153 | 2539 | 2026-04-04T16:22Z |
 
 Notes:
 - All runs: `no_rag=True`, full benchmark split (3116 samples).
-- `gemma2-27b` and `qwen25-72b` contain predictions only; LLM judge scoring not yet run.
-- `llama31_70b` and `qwen3_32b` have full judge scores (`binary_equiv`, `mean_ordinal`).
+- All four rebuttal models now have full judge scores (`binary_equiv`, `mean_ordinal`).
 - Errors in `llama31_70b` (296) and `qwen3_32b` (577) are inference errors; `n_judged` = n_samples − n_errors.
 - Result format: top-level keys `model`, `no_rag`, `n_samples`, `n_errors`, `timestamp`, `results` (list); judged files also have `binary_equiv`, `mean_ordinal`, `n_judged`.
 
