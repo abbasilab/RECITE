@@ -4,6 +4,7 @@ evaluator.py
 Benchmark runner and evaluator for RECITE benchmark.
 """
 
+import asyncio
 import json
 import os
 import re
@@ -242,6 +243,201 @@ def clear_python_gpu_cache() -> None:
             torch.cuda.empty_cache()
     except ImportError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# vLLM endpoint helpers (async HTTP calls to OpenAI-compatible vLLM servers)
+# ---------------------------------------------------------------------------
+
+def _strip_thinking_tags(text: str) -> str:
+    """Strip <think>...</think> tags from Qwen3 responses."""
+    return re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL).strip()
+
+
+async def _vllm_endpoint_call(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    temperature: float = 0,
+    timeout: float = 300.0,
+) -> str:
+    """Call OpenAI-compatible vLLM endpoint with retry and model-specific handling."""
+    messages = []
+    # Gemma models don't support system role — merge into user message
+    if "gemma" in model.lower():
+        combined = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        messages.append({"role": "user", "content": combined})
+    else:
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+    # Estimate token count (~4 chars/token) and cap max_tokens
+    est_input_tokens = sum(len(m["content"]) for m in messages) // 4
+    effective_max_tokens = min(max_tokens, max(256, max_context - est_input_tokens - 100))
+
+    for attempt in range(3):
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": effective_max_tokens,
+            }
+            # Disable thinking for Qwen3 models
+            if "qwen3" in model.lower() or "Qwen3" in model:
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
+            resp = await client.post(
+                f"{endpoint}/chat/completions",
+                json=payload,
+                timeout=timeout,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                return _strip_thinking_tags(content)
+            elif resp.status_code == 400:
+                error = resp.json().get("error", {}).get("message", resp.text[:200])
+                if "maximum context length" in error and attempt < 2:
+                    user_prompt = user_prompt[:len(user_prompt) // 2]
+                    messages[-1]["content"] = user_prompt
+                    est_input_tokens = sum(len(m["content"]) for m in messages) // 4
+                    effective_max_tokens = min(max_tokens, max(256, max_context - est_input_tokens - 100))
+                    continue
+                return f"[ERROR_400] {error}"
+            elif resp.status_code in (429, 503):
+                await asyncio.sleep(2 ** attempt)
+                continue
+            else:
+                resp.raise_for_status()
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError,
+                httpx.RemoteProtocolError, httpx.ReadError) as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return f"[ERROR_TIMEOUT] {e}"
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return f"[ERROR] {type(e).__name__}: {e}"
+    return "[ERROR] Max retries exceeded"
+
+
+def _vllm_endpoint_predict_sync(
+    endpoint: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    timeout: float = 300.0,
+) -> str:
+    """Synchronous wrapper around _vllm_endpoint_call for use in run_single_sample."""
+    async def _inner():
+        async with httpx.AsyncClient() as client:
+            return await _vllm_endpoint_call(
+                client, endpoint, model, system_prompt, user_prompt,
+                max_tokens=max_tokens, max_context=max_context, timeout=timeout,
+            )
+    # Use existing loop if available, else create new one
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _inner()).result()
+    return asyncio.run(_inner())
+
+
+async def _vllm_endpoint_predict_batch(
+    endpoint: str,
+    model: str,
+    samples: List[Dict[str, Any]],
+    prompts_obj: "BenchmarkPrompts",
+    tokenizer: Any,
+    no_rag_max_tokens: int,
+    max_concurrent: int = 16,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    timeout: float = 300.0,
+    prompt_suffix: str = "",
+    checkpoint_callback: Optional[Callable[[int], None]] = None,
+    save_every: int = 50,
+) -> List[str]:
+    """Run async concurrent predictions against a vLLM endpoint.
+
+    Returns list of prediction strings (one per sample, in order).
+    checkpoint_callback(completed_count) is called every save_every completions.
+    """
+    semaphore = asyncio.Semaphore(max_concurrent)
+    results = [None] * len(samples)
+    completed = 0
+
+    async with httpx.AsyncClient() as client:
+        async def process_one(idx: int, sample: dict):
+            nonlocal completed
+            async with semaphore:
+                # Build prompt (same as python_gpu path)
+                source_text = str(sample.get("source_text", "") or "")
+                evidence = str(sample.get("evidence", "") or "")
+                source_version = sample.get("source_version")
+                target_version = sample.get("target_version")
+                try:
+                    vf = int(float(source_version)) if source_version is not None and not pd.isna(source_version) else None
+                except (ValueError, TypeError):
+                    vf = None
+                try:
+                    vt = int(float(target_version)) if target_version is not None and not pd.isna(target_version) else None
+                except (ValueError, TypeError):
+                    vt = None
+
+                has_document = bool(evidence.strip())
+                user_prompt = _format_model_prompt(
+                    source_text, prompts_obj.model_prompt,
+                    has_document=has_document, source_version=vf, target_version=vt,
+                )
+                system_prompt = prompts_obj.model_prompt.get("system", "")
+
+                # Tokenizer-based evidence truncation (matches python_gpu path)
+                if evidence.strip():
+                    ev = evidence.strip()
+                    if tokenizer is not None:
+                        enc = tokenizer.encode(ev)
+                        if len(enc) > no_rag_max_tokens:
+                            ev = tokenizer.decode(enc[:no_rag_max_tokens])
+                    else:
+                        max_chars = no_rag_max_tokens * 4
+                        if len(ev) > max_chars:
+                            ev = ev[:max_chars]
+                    user_prompt += f"\n\nSupporting evidence:\n{ev}"
+
+                if prompt_suffix:
+                    user_prompt += f"\n\n{prompt_suffix}"
+
+                try:
+                    prediction = await _vllm_endpoint_call(
+                        client, endpoint, model, system_prompt, user_prompt,
+                        max_tokens=max_tokens, max_context=max_context, timeout=timeout,
+                    )
+                except Exception as e:
+                    prediction = f"[ERROR] {type(e).__name__}: {e}"
+                results[idx] = prediction
+
+        tasks = [process_one(i, s) for i, s in enumerate(samples)]
+        for coro in asyncio.as_completed(tasks):
+            await coro
+            completed += 1
+            if checkpoint_callback and completed % save_every == 0:
+                checkpoint_callback(completed)
+
+    return [r if r is not None else "[ERROR] No result" for r in results]
 
 
 @dataclass
@@ -1332,8 +1528,65 @@ def run_single_sample(
                     raise
             model_callable = _call
             is_endpoint = True
+        elif isinstance(model, dict) and model.get("api_type") == "vllm_endpoint" and "model" in model:
+            # vLLM endpoint: async HTTP to OpenAI-compatible vLLM server
+            vllm_model_name = model["model"]
+            vllm_endpoint = model["endpoint"]
+            vllm_max_tokens = int(model.get("max_tokens", 2048))
+            vllm_max_context = int(model.get("context_window", 8192))
+            vllm_timeout = float(model.get("timeout", 300.0))
+            vllm_prompt_suffix = model.get("prompt_suffix", "")
+            # Evidence budget (same as python_gpu)
+            context_window = model.get("context_window")
+            ctx_tokens = int(context_window) if context_window is not None else 8192
+            no_rag_max_tokens = model.get("no_rag_max_tokens")
+            if no_rag_max_tokens is None and context_window is not None:
+                no_rag_max_tokens = max(0, ctx_tokens - 4096)
+            if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+                no_rag_max_tokens = 512
+            no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+            # Load tokenizer for accurate truncation
+            vllm_tokenizer = None
+            try:
+                from transformers import AutoTokenizer
+                vllm_tokenizer = AutoTokenizer.from_pretrained(vllm_model_name)
+            except Exception:
+                logger.debug("vllm_endpoint: tokenizer not available for {}, using char-based truncation", vllm_model_name)
+
+            def _call(
+                source_text: str,
+                evidence: str,
+                source_version: Optional[int] = None,
+                target_version: Optional[int] = None,
+            ) -> str:
+                has_document = evidence is not None and bool(evidence.strip())
+                user_prompt = _format_model_prompt(
+                    source_text, prompts.model_prompt,
+                    has_document=has_document, source_version=source_version, target_version=target_version,
+                )
+                system_prompt = prompts.model_prompt.get("system", "")
+                if evidence and evidence.strip():
+                    ev = evidence.strip()
+                    if vllm_tokenizer is not None:
+                        enc = vllm_tokenizer.encode(ev)
+                        if len(enc) > no_rag_max_tokens:
+                            ev = vllm_tokenizer.decode(enc[:no_rag_max_tokens])
+                    else:
+                        max_chars = no_rag_max_tokens * 4
+                        if len(ev) > max_chars:
+                            ev = ev[:max_chars]
+                    user_prompt += f"\n\nSupporting evidence:\n{ev}"
+                if vllm_prompt_suffix:
+                    user_prompt += f"\n\n{vllm_prompt_suffix}"
+                return _vllm_endpoint_predict_sync(
+                    vllm_endpoint, vllm_model_name, system_prompt, user_prompt,
+                    max_tokens=vllm_max_tokens, max_context=vllm_max_context,
+                    timeout=vllm_timeout,
+                )
+            model_callable = _call
+            is_endpoint = True
         else:
-            raise ValueError("model must be a callable or dict with api_type ucsf_versa, endpoint/model, or python_gpu")
+            raise ValueError("model must be a callable or dict with api_type ucsf_versa, endpoint/model, python_gpu, or vllm_endpoint")
 
         # Get prediction
         source_text = sample_row.get("source_text") or ""
@@ -1645,6 +1898,68 @@ def run_benchmark(
                 logger.info("python_gpu: generate done (out_len={}, call#={})", out.shape[1], n + 1)
             gen = out[0][prompt_ids.shape[1]:]
             return tokenizer.decode(gen, skip_special_tokens=True).strip()
+    elif isinstance(model, dict) and model.get("api_type") == "vllm_endpoint" and "model" in model:
+        # vLLM endpoint: async HTTP to OpenAI-compatible vLLM server with concurrency
+        vllm_model_name = model["model"]
+        vllm_endpoint = model["endpoint"]
+        vllm_max_tokens = int(model.get("max_tokens", 2048))
+        vllm_max_context = int(model.get("context_window", 8192))
+        vllm_timeout = float(model.get("timeout", 300.0))
+        vllm_prompt_suffix = model.get("prompt_suffix", "")
+        vllm_max_concurrent = int(model.get("max_concurrent", 16))
+        vllm_save_every = int(model.get("save_every", 50))
+        # Evidence budget (same as python_gpu)
+        context_window = model.get("context_window")
+        ctx_tokens = int(context_window) if context_window is not None else 8192
+        no_rag_max_tokens = model.get("no_rag_max_tokens")
+        if no_rag_max_tokens is None and context_window is not None:
+            no_rag_max_tokens = max(0, ctx_tokens - 4096)
+        if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+            no_rag_max_tokens = 512
+        no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+        # Load tokenizer
+        vllm_tokenizer = None
+        try:
+            from transformers import AutoTokenizer
+            vllm_tokenizer = AutoTokenizer.from_pretrained(vllm_model_name)
+            logger.info("vllm_endpoint: tokenizer loaded ({})", vllm_model_name)
+        except Exception:
+            logger.info("vllm_endpoint: tokenizer not available for {}, using char-based truncation", vllm_model_name)
+        logger.info("vllm_endpoint: model={}, endpoint={}, ctx={}, evidence_budget={}, concurrent={}",
+                     vllm_model_name, vllm_endpoint, ctx_tokens, no_rag_max_tokens, vllm_max_concurrent)
+        is_endpoint = False  # no RAG needed
+
+        # Synchronous callable for single-sample path (used by _run_one_row)
+        def model_callable(
+            source_text: str,
+            evidence: str,
+            source_version: Optional[int] = None,
+            target_version: Optional[int] = None,
+        ) -> str:
+            has_document = evidence is not None and bool(evidence.strip())
+            user_prompt = _format_model_prompt(
+                source_text, prompts.model_prompt,
+                has_document=has_document, source_version=source_version, target_version=target_version,
+            )
+            system_prompt = prompts.model_prompt.get("system", "")
+            if evidence and evidence.strip():
+                ev = evidence.strip()
+                if vllm_tokenizer is not None:
+                    enc = vllm_tokenizer.encode(ev)
+                    if len(enc) > no_rag_max_tokens:
+                        ev = vllm_tokenizer.decode(enc[:no_rag_max_tokens])
+                else:
+                    max_chars = no_rag_max_tokens * 4
+                    if len(ev) > max_chars:
+                        ev = ev[:max_chars]
+                user_prompt += f"\n\nSupporting evidence:\n{ev}"
+            if vllm_prompt_suffix:
+                user_prompt += f"\n\n{vllm_prompt_suffix}"
+            return _vllm_endpoint_predict_sync(
+                vllm_endpoint, vllm_model_name, system_prompt, user_prompt,
+                max_tokens=vllm_max_tokens, max_context=vllm_max_context,
+                timeout=vllm_timeout,
+            )
     elif isinstance(model, dict) and "endpoint" in model and "model" in model:
         endpoint = model["endpoint"]
         llm_model = model["model"]
@@ -1694,7 +2009,7 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
     else:
-        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'ucsf_versa'")
+        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'ucsf_versa'/'vllm_endpoint'")
     
     # Load parquet files
     splits = {}

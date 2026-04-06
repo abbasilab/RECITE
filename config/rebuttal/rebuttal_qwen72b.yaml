@@ -23,10 +23,12 @@ rag:
 
 models:
   - id: qwen25-72b
-    api_type: endpoint
+    api_type: vllm_endpoint
     model: Qwen/Qwen2.5-72B-Instruct
     endpoint: http://localhost:8300/v1
     context_window: 32768
+    max_concurrent: 16
+    save_every: 50
 
 prompts_file: config/benchmark_prompts.json
 evaluator_type: default

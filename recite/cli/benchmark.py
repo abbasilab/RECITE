@@ -1283,6 +1283,34 @@ def run_benchmark(
             two_step_m = m.get("two_step")
             if two_step_m is None and bench_config:
                 two_step_m = bench_config.get("two_step", False)
+        elif api_type == "vllm_endpoint":
+            ep = m.get("endpoint")
+            if not ep or not mod:
+                logger.warning(f"Skipping model entry missing endpoint or model (vllm_endpoint): {m}")
+                continue
+            if not check_server_health(ep, timeout=5):
+                logger.warning(f"Server at {ep} not reachable; skipping model {m.get('id', mod)}")
+                continue
+            model_id = _sanitize_model_id(m.get("id", mod))
+            out_dir = output_dir / model_id
+            model = {"api_type": "vllm_endpoint", "model": mod, "endpoint": ep}
+            if m.get("context_window") is not None:
+                model["context_window"] = int(m["context_window"])
+            if m.get("no_rag_max_tokens") is not None:
+                model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
+            if m.get("max_tokens") is not None:
+                model["max_tokens"] = int(m["max_tokens"])
+            if m.get("timeout") is not None:
+                model["timeout"] = float(m["timeout"])
+            if m.get("max_concurrent") is not None:
+                model["max_concurrent"] = int(m["max_concurrent"])
+            if m.get("save_every") is not None:
+                model["save_every"] = int(m["save_every"])
+            if m.get("prompt_suffix") is not None:
+                model["prompt_suffix"] = str(m["prompt_suffix"])
+            two_step_m = m.get("two_step")
+            if two_step_m is None and bench_config:
+                two_step_m = bench_config.get("two_step", False)
         else:
             ep = m.get("endpoint")
             if not ep or not mod:

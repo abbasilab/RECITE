@@ -14,10 +14,12 @@ rag:
 
 models:
   - id: vllm-llama-70b
-    api_type: endpoint
+    api_type: vllm_endpoint
     model: meta-llama/Llama-3.1-70B-Instruct
     endpoint: http://localhost:8100/v1
     context_window: 32768
+    max_concurrent: 16
+    save_every: 50
 
 prompts_file: config/benchmark_prompts.json
 evaluator_type: default
