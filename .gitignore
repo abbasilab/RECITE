@@ -21,3 +21,8 @@ dumps/
 *.log
 .DS_Store
 data/results/
+
+# Agent artifacts (ephemeral)
+.agent-sessions/
+briefings/
+TASK_BRIEFING.md

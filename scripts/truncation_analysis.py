@@ -79,6 +79,35 @@ MODELS = {
         "tokenizer": "cl100k_base",
         "config_id_norag": "1fa16bf2ad873d803624dde8",
     },
+    # --- Rebuttal models (vLLM endpoint) ---
+    "Qwen 2.5 72B (32K ctx)": {
+        "context_window": 32_768,
+        "no_rag_max_tokens": 28_672,
+        "api_type": "endpoint",
+        "tokenizer": "cl100k_base",
+        "config_id_norag": None,
+    },
+    "Gemma 2 27B (8K ctx)": {
+        "context_window": 8_192,
+        "no_rag_max_tokens": 4_096,
+        "api_type": "endpoint",
+        "tokenizer": "cl100k_base",
+        "config_id_norag": None,
+    },
+    "Llama 3.1 70B": {
+        "context_window": 128_000,
+        "no_rag_max_tokens": 123_904,
+        "api_type": "endpoint",
+        "tokenizer": "cl100k_base",
+        "config_id_norag": None,
+    },
+    "Qwen3 32B": {
+        "context_window": 32_768,
+        "no_rag_max_tokens": 28_672,
+        "api_type": "endpoint",
+        "tokenizer": "cl100k_base",
+        "config_id_norag": None,
+    },
 }
 
 # Benchmark results DB
@@ -260,6 +289,9 @@ def main():
         conn = sqlite3.connect(str(RESULTS_DB))
         for model_name, model_cfg in MODELS.items():
             config_id = model_cfg["config_id_norag"]
+            if config_id is None:
+                print(f"\n--- {model_name} (no_rag, endpoint model — no DB results) ---")
+                continue
             print(f"\n--- {model_name} (no_rag, config={config_id[:12]}...) ---")
             bucket_df = length_controlled_analysis(df, token_counts, config_id, conn)
             if len(bucket_df) > 0:

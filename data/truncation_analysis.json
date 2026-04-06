@@ -149,6 +149,66 @@
       "trunc_median_lost_tokens": 53365,
       "trunc_mean_lost_tokens": 143922,
       "trunc_max_lost_tokens": 593357
+    },
+    "Qwen 2.5 72B (32K ctx)": {
+      "context_window": 32768,
+      "no_rag_max_tokens": 28672,
+      "api_type": "endpoint",
+      "n_samples": 3116,
+      "n_truncated": 1636,
+      "pct_truncated": 52.503209242618745,
+      "mean_retained_frac": 0.8111231764032398,
+      "median_retained_frac": 0.953952621772691,
+      "p5_retained_frac": 0.3570189926798764,
+      "trunc_mean_retained_frac": 0.6402566122692512,
+      "trunc_median_lost_tokens": 15407,
+      "trunc_mean_lost_tokens": 26565,
+      "trunc_max_lost_tokens": 688589
+    },
+    "Gemma 2 27B (8K ctx)": {
+      "context_window": 8192,
+      "no_rag_max_tokens": 4096,
+      "api_type": "endpoint",
+      "n_samples": 3116,
+      "n_truncated": 2864,
+      "pct_truncated": 91.91270860077022,
+      "mean_retained_frac": 0.2354545063659749,
+      "median_retained_frac": 0.1362789459675273,
+      "p5_retained_frac": 0.051002713239982345,
+      "trunc_mean_retained_frac": 0.1681830453339308,
+      "trunc_median_lost_tokens": 28314,
+      "trunc_mean_lost_tokens": 35466,
+      "trunc_max_lost_tokens": 713165
+    },
+    "Llama 3.1 70B": {
+      "context_window": 128000,
+      "no_rag_max_tokens": 123904,
+      "api_type": "endpoint",
+      "n_samples": 3116,
+      "n_truncated": 51,
+      "pct_truncated": 1.6367137355584083,
+      "mean_retained_frac": 0.9939701628578538,
+      "median_retained_frac": 1.0,
+      "p5_retained_frac": 1.0,
+      "trunc_mean_retained_frac": 0.6315887738249543,
+      "trunc_median_lost_tokens": 53365,
+      "trunc_mean_lost_tokens": 143922,
+      "trunc_max_lost_tokens": 593357
+    },
+    "Qwen3 32B": {
+      "context_window": 32768,
+      "no_rag_max_tokens": 28672,
+      "api_type": "endpoint",
+      "n_samples": 3116,
+      "n_truncated": 1636,
+      "pct_truncated": 52.503209242618745,
+      "mean_retained_frac": 0.8111231764032398,
+      "median_retained_frac": 0.953952621772691,
+      "p5_retained_frac": 0.3570189926798764,
+      "trunc_mean_retained_frac": 0.6402566122692512,
+      "trunc_median_lost_tokens": 15407,
+      "trunc_mean_lost_tokens": 26565,
+      "trunc_max_lost_tokens": 688589
     }
   }
 }
