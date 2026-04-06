@@ -3,7 +3,7 @@
 #
 # Prerequisites: Start a vLLM server on 8 GPUs:
 #   vllm serve Qwen/Qwen2.5-72B-Instruct \
-#     --tensor-parallel-size 8 --max-model-len 8192 \
+#     --tensor-parallel-size 8 --max-model-len 32768 \
 #     --dtype bfloat16 --port 8300 --enforce-eager
 #
 # Usage:
@@ -26,7 +26,7 @@ models:
     api_type: endpoint
     model: Qwen/Qwen2.5-72B-Instruct
     endpoint: http://localhost:8300/v1
-    context_window: 8192
+    context_window: 32768
 
 prompts_file: config/benchmark_prompts.json
 evaluator_type: default

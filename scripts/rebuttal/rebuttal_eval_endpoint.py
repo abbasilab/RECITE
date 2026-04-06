@@ -19,7 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 
 # Project root
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Load prompts
 PROMPTS = json.loads((ROOT / "config" / "benchmark_prompts.json").read_text())
@@ -32,9 +32,11 @@ JUDGE_BATCHED_SYSTEM = PROMPTS["judge_prompt_batched"]["system"]
 JUDGE_BATCHED_USER = PROMPTS["judge_prompt_batched"]["user_template"]
 
 
-def build_prompt(row: dict, no_rag: bool = True, max_evidence_chars: int = 20000) -> tuple[str, str]:
+def build_prompt(row: dict, no_rag: bool = True, max_evidence_chars: int = 20000, prompt_suffix: str = "") -> tuple[str, str]:
     """Build system + user prompt for a benchmark sample.
-    Truncates evidence to fit within context window (est ~4 chars/token, 8K context).
+    Truncates evidence to max_evidence_chars. Callers should set this based on
+    the model's context window: (context_window - 4096) * 4 chars/token.
+    prompt_suffix is appended to the user prompt (e.g. model-specific instructions).
     """
     source = str(row.get("source_text", "") or "")
     evidence = str(row.get("evidence", "") or "")
@@ -70,6 +72,9 @@ def build_prompt(row: dict, no_rag: bool = True, max_evidence_chars: int = 20000
             user_prompt += f"\n\nSupporting evidence:\n{evidence}"
         else:
             user_prompt = MODEL_USER_NORAG.format(**kwargs)
+
+    if prompt_suffix:
+        user_prompt += f"\n\n{prompt_suffix}"
 
     return MODEL_SYSTEM, user_prompt
 
@@ -214,16 +219,24 @@ async def run_predictions(
     use_ollama: bool = False,
     timeout: float = 300.0,
     max_context: int = 8192,
+    max_evidence_chars: int = 20000,
+    prompt_suffix: str = "",
+    output_path: Path | None = None,
+    save_every: int = 50,
 ) -> list[dict]:
-    """Run predictions concurrently on all samples."""
+    """Run predictions concurrently on all samples.
+
+    If output_path is provided, saves incrementally every save_every samples.
+    """
     semaphore = asyncio.Semaphore(max_concurrent)
     results = [None] * len(samples)
+    completed = 0
 
     async with httpx.AsyncClient() as client:
         async def process_one(idx: int, sample: dict):
             async with semaphore:
                 try:
-                    sys_prompt, user_prompt = build_prompt(sample, no_rag=no_rag)
+                    sys_prompt, user_prompt = build_prompt(sample, no_rag=no_rag, max_evidence_chars=max_evidence_chars, prompt_suffix=prompt_suffix)
                     if use_ollama:
                         prediction = await call_ollama_native(
                             client, endpoint, model, sys_prompt, user_prompt,
@@ -249,13 +262,21 @@ async def run_predictions(
         tasks = [process_one(i, s) for i, s in enumerate(samples)]
         pbar = tqdm(total=len(tasks), desc=f"Predict ({model})", unit="sample")
 
-        # Process with progress updates
+        # Process with progress updates + incremental saves
         for coro in asyncio.as_completed(tasks):
             await coro
+            completed += 1
             pbar.update(1)
+            if output_path and completed % save_every == 0:
+                partial = [r for r in results if r is not None]
+                save_results(partial, output_path, model, no_rag)
+                tqdm.write(f"  [checkpoint] saved {len(partial)}/{len(samples)} predictions")
         pbar.close()
 
-    return [r for r in results if r is not None]
+    final = [r for r in results if r is not None]
+    if output_path:
+        save_results(final, output_path, model, no_rag)
+    return final
 
 
 def parse_judge_scores(response: str) -> dict:
@@ -437,9 +458,14 @@ async def main():
     parser.add_argument("--max-tokens", type=int, default=2048, help="Max tokens for generation")
     parser.add_argument("--timeout", type=float, default=300.0, help="Timeout per request in seconds")
     parser.add_argument("--max-context", type=int, default=8192, help="Max context window for token capping")
+    parser.add_argument("--max-evidence-chars", type=int, default=None,
+                        help="Max evidence chars (default: (max_context - 4096) * 4)")
+    parser.add_argument("--prompt-suffix", type=str, default="",
+                        help="Model-specific text appended to user prompt (e.g. 'Do not use markdown formatting.')")
     parser.add_argument("--no-rag", action="store_true", default=True)
     parser.add_argument("--skip-judge", action="store_true", help="Skip judge evaluation")
     parser.add_argument("--use-ollama", action="store_true", help="Use Ollama native API (for Qwen3 think=false)")
+    parser.add_argument("--save-every", type=int, default=50, help="Save checkpoint every N predictions (default: 50)")
     parser.add_argument("--limit", type=int, default=None, help="Limit samples for testing")
     args = parser.parse_args()
 
@@ -454,7 +480,15 @@ async def main():
         samples = samples[:args.limit]
     print(f"  {len(samples)} samples loaded")
 
-    # Run predictions
+    # Compute evidence char budget from context window if not specified
+    max_evidence_chars = args.max_evidence_chars
+    if max_evidence_chars is None:
+        # Reserve 4096 tokens for prompt overhead + generation, convert rest to chars (~4 chars/token)
+        max_evidence_chars = max(4000, (args.max_context - 4096) * 4)
+    print(f"  Evidence budget: {max_evidence_chars} chars (~{max_evidence_chars//4} tokens)")
+
+    # Run predictions (with incremental saves)
+    output_path = Path(args.output_dir) / f"{label}_{rag_suffix}.json"
     t0 = time.time()
     results = await run_predictions(
         endpoint=args.endpoint,
@@ -466,6 +500,10 @@ async def main():
         use_ollama=args.use_ollama,
         timeout=args.timeout,
         max_context=args.max_context,
+        max_evidence_chars=max_evidence_chars,
+        prompt_suffix=args.prompt_suffix,
+        output_path=output_path,
+        save_every=args.save_every,
     )
     t_pred = time.time() - t0
     n_errors = sum(1 for r in results if r.get("is_error"))
@@ -483,8 +521,7 @@ async def main():
         t_judge = time.time() - t1
         print(f"\nJudge done in {t_judge:.1f}s")
 
-    # Save
-    output_path = Path(args.output_dir) / f"{label}_{rag_suffix}.json"
+    # Final save (with judge scores if run)
     save_results(results, output_path, args.model, args.no_rag)
 
 
