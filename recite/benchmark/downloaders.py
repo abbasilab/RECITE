@@ -7,7 +7,7 @@ Handles downloading trial versions and protocol PDFs.
 import json
 import sqlite3
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from loguru import logger
 

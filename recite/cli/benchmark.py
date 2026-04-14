@@ -5,9 +5,10 @@ benchmark.py
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, Generator, List, Optional, Set, Union
 
 import typer
 import yaml
@@ -21,21 +22,28 @@ from recite.utils.path_loader import get_project_root
 app = typer.Typer()
 
 
+@contextmanager
+def _managed_connection(db_path: Optional[Path] = None) -> Generator:
+    """Context manager for database connection lifecycle."""
+    conn = get_connection(db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def download_all_trial_versions(
     instance_ids: Optional[List[str]] = None,
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download all trial versions.
-    """
+    """Download all trial versions."""
     from recite.benchmark.downloaders import download_versions
-    
-    conn = get_connection(db_path)
+
     if instance_ids is None:
         instance_ids = _load_instance_ids(None, max_trials)
-    download_versions(instance_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_versions(instance_ids, max_trials, conn)
 
 
 def download_trial_eligibility_criteria(
@@ -43,30 +51,24 @@ def download_trial_eligibility_criteria(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download trial eligibility criteria.
-    """
+    """Download trial eligibility criteria."""
     from recite.benchmark.downloaders import download_ecs
-    
-    conn = get_connection(db_path)
+
     if instance_ids is None:
         instance_ids = _load_instance_ids(None, max_trials)
-    download_ecs(instance_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_ecs(instance_ids, max_trials, conn)
 
 
 def identify_trials_with_eligibility_criteria_amendments(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Identify trials with eligibility criteria amendments.
-    """
+    """Identify trials with eligibility criteria amendments."""
     from recite.benchmark.processors import identify_amendments
-    
-    conn = get_connection(db_path)
-    identify_amendments(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        identify_amendments(max_trials, conn)
 
 
 def download_full_trial(
@@ -74,30 +76,24 @@ def download_full_trial(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download full trial protocol PDFs.
-    """
+    """Download full trial protocol PDFs."""
     from recite.benchmark.downloaders import download_protocols
-    
-    conn = get_connection(db_path)
+
     if instance_ids is None:
         instance_ids = _load_instance_ids(None, max_trials)
-    download_protocols(instance_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_protocols(instance_ids, max_trials, conn)
 
 
 def extract_trial_data(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Extract trial data (evidence from protocols).
-    """
+    """Extract trial data (evidence from protocols)."""
     from recite.benchmark.processors import extract_evidence
-    
-    conn = get_connection(db_path)
-    extract_evidence(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        extract_evidence(max_trials, conn)
 
 
 def download_extract_all_relevant_trials(
@@ -105,32 +101,26 @@ def download_extract_all_relevant_trials(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download and extract all relevant trial data.
-    """
+    """Download and extract all relevant trial data."""
     from recite.benchmark.downloaders import download_protocols
     from recite.benchmark.processors import extract_evidence
-    
-    conn = get_connection(db_path)
+
     if instance_ids is None:
         instance_ids = _load_instance_ids(None, max_trials)
-    download_protocols(instance_ids, max_trials, conn)
-    extract_evidence(max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_protocols(instance_ids, max_trials, conn)
+        extract_evidence(max_trials, conn)
 
 
 def create_benchmark_db(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Create benchmark database (build RECITE instances).
-    """
+    """Create benchmark database (build RECITE instances)."""
     from recite.benchmark.builders import create_recite_instances
-    
-    conn = get_connection(db_path)
-    create_recite_instances(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        create_recite_instances(max_trials, conn)
 
 
 @app.command()
