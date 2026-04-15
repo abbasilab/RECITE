@@ -88,6 +88,10 @@ Usage: `uv run init_recite_benchmark.py --workers 4 --num-chunks 10 --chunks 0,1
 |--------|-------------|
 | `reproduce/validate_1to1.py` | 1:1 validation: re-runs original `clintriaLM` code on original DB inputs and compares outputs character-by-character. Must be run from `/home/rro/projects/clintriaLM` using its `.venv`. |
 | `reproduce/compare_predictions.py` | Joins reproduced JSONL predictions with original DB results on `(instance_id, source_version, target_version)`, reports exact-match rates and character-level similarity. |
+| `reproduce/reproduce_originals.yaml` | Config for reproducing all 8 original paper models. |
+| `reproduce/reproduce_500.yaml` | Config for 500-sample reproduction subset. |
+| `reproduce/reproduce_small_all_models.yaml` | Config for small-sample reproduction across all models. |
+| `reproduce/reproduce_smoke.yaml` | Minimal smoke-test reproduction config. |
 
 ---
 
@@ -102,6 +106,12 @@ Used alongside the standard `recite benchmark run-benchmark` CLI for specialized
 | `run_hf_eval.py` | 399 | Standalone HF Transformers eval for large models (multi-GPU, no vLLM) |
 | `rebuttal_compile_results.py` | 81 | Compile rebuttal JSON results into scaling trend markdown table |
 | `equiv_test_hf.py` | 107 | Equivalence test: compare vLLM endpoint vs HF Transformers outputs at temperature=0 |
+| `judge_score.py` | 452 | Unified judge scorer: concurrent, resumable LLM-as-judge scoring for rebuttal JSON results |
+| `judge_only.py` | 225 | Judge-only mode: score existing predictions without re-running inference |
+| `recite_rebuttal_analysis.py` | 328 | Recreate paper Table 1 + truncation subset analysis for rebuttal narrative |
+| `truncation_evidence_check.py` | 355 | DVUB W1: classify 3,116 samples for whether EC appears in truncated evidence window |
+| `truncation_stratified_verify.py` | 475 | DVUB W1: stratified re-verification (150 samples, gpt-4.1 + mini) |
+| `watch_evals.sh` | 75 | Shell helper: watch vLLM eval runs and report progress |
 
 ### rebuttal_eval_endpoint.py
 

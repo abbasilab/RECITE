@@ -14,6 +14,7 @@ Transfer rebuttal-supporting scripts from clintriaLM to RECITE so the repo is se
 | `truncation_stratified_verify.py` | clintriaLM/scripts/ | scripts/rebuttal/ | DVUB W1 — stratified re-verification (150 samples, gpt-4.1 + mini) |
 | `recite_rebuttal_analysis.py` | clintriaLM/scripts/ | scripts/rebuttal/ | Table 1 recreation + truncation subset analysis |
 | `judge_score.py` | clintriaLM/scripts/ | scripts/rebuttal/ | Unified judge scorer (452 LOC, concurrent, resumable) |
+| `judge_only.py` | clintriaLM/scripts/ | scripts/rebuttal/ | Judge-only mode (225 LOC, score existing predictions) |
 
 **Data symlinks created:**
 - `data/prod/benchmark_results.db` -> clintriaLM
@@ -49,7 +50,7 @@ Transfer human evaluation infrastructure for Yns9 W4 response and camera-ready.
 |------|---------|--------|
 | Clean README for external users | Remove internal references, add setup instructions | Low |
 | Single-command reproduction | `recite benchmark run-benchmark` already works; verify end-to-end | Low |
-| LICENSE file | Apache 2.0 or MIT | Trivial |
+| LICENSE file | Already CC-BY-NC-SA-4.0 | Done |
 | Data release | Benchmark splits (11,913 instances) already in Git LFS | Done |
 | CI/CD | GitHub Actions for pytest + linting | Low |
 | Remove internal symlinks | Replace clintriaLM symlinks with standalone data or instructions | Medium |

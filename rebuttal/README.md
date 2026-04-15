@@ -62,6 +62,7 @@ The complete LLM-as-judge evaluation prompt is at `config/benchmark_prompts.json
 
 Results from large model evaluations (addressing Yns9 W4) are in `data/rebuttal/`:
 - `gemma2-27b_no_rag.json` — complete with judge scores (46.3% binary, 2.964 ordinal)
+- `gemma2-27b-nomd_no_rag.json` — no-markdown variant (46.4% binary, 3.200 ordinal)
 - `qwen25-72b_no_rag.json` — complete with judge scores (50.5% binary, 3.216 ordinal)
 - `llama31_70b_no_rag.json` — complete with judge scores (42.2% binary)
 - `qwen3_32b_no_rag.json` — complete with judge scores (43.2% binary)

@@ -52,6 +52,7 @@ Stored in `data/rebuttal/` as consolidated JSON files. These **are tracked in gi
 | File | HF Model | Params | n_samples | n_errors | `binary_equiv` | `mean_ordinal` | n_judged | Timestamp |
 |------|----------|--------|-----------|----------|----------------|----------------|----------|-----------|
 | `gemma2-27b_no_rag.json` | google/gemma-2-27b-it | 27B | 3116 | 0 | **0.463** | 2.964 | 3116 | 2026-04-05T12:08Z |
+| `gemma2-27b-nomd_no_rag.json` | google/gemma-2-27b-it (no-markdown) | 27B | 3116 | 0 | **0.464** | 3.200 | 3116 | 2026-04-06T05:56Z |
 | `llama31_70b_no_rag.json` | meta-llama/Llama-3.1-70B-Instruct | 70B | 3116 | 296 | **0.422** | 3.056 | 2820 | 2026-04-04T11:32Z |
 | `qwen25-72b_no_rag.json` | Qwen/Qwen2.5-72B-Instruct | 72B | 3116 | 0 | **0.505** | 3.216 | 3116 | 2026-04-05T14:03Z |
 | `qwen3_32b_no_rag.json` | Qwen/Qwen3-32B | 32B | 3116 | 577 | **0.432** | 3.153 | 2539 | 2026-04-04T16:22Z |
@@ -86,6 +87,21 @@ Notes:
 | Path | Tracked |
 |------|---------|
 | `data/benchmark_predictions/` | Gitignored (reproduced locally) |
-| `data/rebuttal/*.json` | Tracked in git (rebuttal evidence, ~19–20 MB each) |
+| `data/rebuttal/*.json` | Tracked in git (rebuttal evidence, ~19–21 MB each) |
 | `data/benchmark_splits/benchmark.parquet` | Tracked via Git LFS (`.gitattributes`) |
 | `data/dev/`, `data/prod/` | Gitignored |
+
+---
+
+## Data Symlinks (gitignored, local development only)
+
+These symlinks point to the parent `clintriaLM` project databases for cross-project queries.
+
+| Symlink | Target | Purpose |
+|---------|--------|---------|
+| `data/dev/recite.db` | `clintriaLM/data/prod/recite.db` | RECITE benchmark DB (trials, EC versions) |
+| `data/prod/benchmark_results.db` | `clintriaLM/data/prod/benchmark_results.db` | Original paper benchmark results |
+| `data/accrual.db` | `clintriaLM/data/prod/accrual.db` | Accrual impact scoring DB |
+| `data/clintrialm.db` | `clintriaLM/data/prod/clintrialm.db` | Main clintriaLM project DB |
+| `data/recite.db` | `clintriaLM/data/prod/recite.db` | Root-level convenience symlink |
+| `config/judge_variants/` | `clintriaLM/config/judge_variants/` | LLM judge prompt variants |

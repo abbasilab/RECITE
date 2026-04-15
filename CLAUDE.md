@@ -40,7 +40,7 @@ tests/fixtures/             # Synthetic trial, protocol, paper data
 ## Key Numbers
 
 - 11,913 benchmark instances across 5,735 trials
-- Best model: GPT-4o-mini (85.8% binary equivalence)
+- Best model: GPT-4o (85.8% binary equivalence)
 - Best open-weight: Gemma 2 9B (84.7%)
 
 ## Environment

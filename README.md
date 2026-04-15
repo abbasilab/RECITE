@@ -2,7 +2,7 @@
 
 **Revising Eligibility Criteria Incorporating Textual Evidence**
 
-Overly restrictive eligibility criteria contribute to widespread enrollment failure in clinical trials, yet published recommendations for broadening specific criteria remain disconnected from trial design at scale. RECITE automates the discovery, extraction, and implementation of evidence-based eligibility criteria revisions. It constructs an 11,913-instance dataset across 5,735 trials from ClinicalTrials.gov protocol amendments, benchmarks 8 LLM configurations (best: 85.8% binary equivalence with GPT-4o-mini; best open-weight: 84.7% with Gemma 2 9B), and includes an agentic literature discovery system that identifies 44 paper-trial matches with estimated enrollment gains of 25-246%.
+Overly restrictive eligibility criteria contribute to widespread enrollment failure in clinical trials, yet published recommendations for broadening specific criteria remain disconnected from trial design at scale. RECITE automates the discovery, extraction, and implementation of evidence-based eligibility criteria revisions. It constructs an 11,913-instance dataset across 5,735 trials from ClinicalTrials.gov protocol amendments, benchmarks 8 LLM configurations (best: 85.8% binary equivalence with GPT-4o; best open-weight: 84.7% with Gemma 2 9B), and includes an agentic literature discovery system that identifies 44 paper-trial matches with estimated enrollment gains of 25-246%.
 
 ## Pipeline
 
