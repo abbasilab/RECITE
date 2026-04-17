@@ -12,7 +12,7 @@ from recite.benchmark.api_client import (
     fetch_version_data,
     fetch_version_history,
 )
-from recite.crawler.adapters import ClinicalTrialsGovAdapter
+from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
 
 def download_versions(

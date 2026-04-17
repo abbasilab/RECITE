@@ -11,11 +11,11 @@ rag:
   sweep_no_rag: true
 
 models:
-  - id: versa-4o
+  - id: azure-4o
     api_type: azure_openai
     model: gpt-4o-2024-08-06
     context_window: 128000
-  - id: versa-4o-mini
+  - id: azure-4o-mini
     api_type: azure_openai
     model: gpt-4o-mini-2024-07-18
     context_window: 128000

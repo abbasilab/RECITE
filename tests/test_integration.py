@@ -225,7 +225,7 @@ class TestDataLoading:
 
     def test_fetch_trials_with_eligibility_criteria(self):
         """Fetch a small batch of trials and verify they have eligibility criteria."""
-        from recite.crawler.adapters import ClinicalTrialsGovAdapter
+        from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
         adapter = ClinicalTrialsGovAdapter(requests_per_second=3.0)
         docs = list(adapter.search("diabetes eligibility criteria", max_results=5))

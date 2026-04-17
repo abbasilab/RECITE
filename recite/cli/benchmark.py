@@ -256,7 +256,7 @@ def init_benchmark(
         if max_trials:
             manual_instance_ids = manual_instance_ids[:max_trials]
         
-        from recite.crawler.adapters import ClinicalTrialsGovAdapter
+        from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
         adapter = ClinicalTrialsGovAdapter()
         
         logger.info("Checking version counts for manual NCT IDs...")

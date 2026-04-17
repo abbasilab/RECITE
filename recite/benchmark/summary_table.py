@@ -34,7 +34,7 @@ def _field_explanations_md(include_run_config: bool = True) -> str:
     table_cols = """### Table columns
 | Column | Description |
 |--------|-------------|
-| **Model** | Model ID from config (e.g. versa-4o, versa-4o-mini). |
+| **Model** | Model ID from config (e.g. azure-4o, azure-4o-mini). |
 | **Run** | Run directory name (timestamp and no_rag / topk{N}). |
 """
     if include_run_config:
