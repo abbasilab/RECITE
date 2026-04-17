@@ -1,9 +1,4 @@
-"""
-Shared rate limiter for RECITE benchmark (multi-worker scripts).
-
-Process-wide, thread-safe rate limiter so multiple workers do not exceed
-ClinicalTrials.gov API limits. Optional use; existing adapter behavior unchanged.
-"""
+"""Thread-safe rate limiter for API calls."""
 
 import threading
 import time

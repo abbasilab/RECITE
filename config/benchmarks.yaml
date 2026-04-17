@@ -1,8 +1,4 @@
-# DEFAULT: Full benchmark config with all models (cluster A + B).
-# Use this for single-machine runs or reference. For multi-machine, use:
-#   - benchmarks_train_*.yaml (train split, ~3k samples)
-#   - benchmarks_eval_*.yaml  (eval split, ~8.8k samples)
-# Run: uv run recite.py run --config config/benchmarks.yaml --backend all
+# Full benchmark config with all models.
 
 rag:
   embed_base_url: ""
@@ -15,16 +11,14 @@ rag:
   sweep_no_rag: true
 
 models:
-  # Versa (cluster A)
-  - id: versa-4o
-    api_type: ucsf_versa
+  - id: azure-4o
+    api_type: azure_openai
     model: gpt-4o-2024-08-06
     context_window: 128000
-  - id: versa-4o-mini
-    api_type: ucsf_versa
+  - id: azure-4o-mini
+    api_type: azure_openai
     model: gpt-4o-mini-2024-07-18
     context_window: 128000
-  # Local (cluster A)
   - id: local-qwen-0.5b
     api_type: python_gpu
     model: Qwen/Qwen2.5-0.5B-Instruct
@@ -45,7 +39,6 @@ models:
     model: google/gemma-2-2b-it
     gpus: 1
     context_window: 8192
-  # Local (cluster B)
   - id: local-gemma2-9b
     api_type: python_gpu
     model: google/gemma-2-9b-it
@@ -64,10 +57,11 @@ batch_size: 10
 top_k: 10
 wait_for_revive_seconds: 0
 
-judge_api_type: ucsf_versa
+judge_api_type: azure_openai
 judge_model_type: "4o"
 
 parquet_paths:
   benchmark: data/benchmark_splits/benchmark.parquet
 splits_to_run: [benchmark]
+from_db: false
 

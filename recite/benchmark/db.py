@@ -1,8 +1,4 @@
-"""
-Database schema and helpers for RECITE benchmark.
-
-RECITE = Revising Eligibility Criteria using Textual Evidence
-"""
+"""Database schema and helpers for RECITE benchmark."""
 
 import shutil
 import sqlite3

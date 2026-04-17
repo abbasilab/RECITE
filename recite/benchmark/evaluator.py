@@ -1,9 +1,6 @@
-"""
-evaluator.py
+"""Benchmark runner and evaluator."""
 
-Benchmark runner and evaluator for RECITE benchmark.
-"""
-
+import asyncio
 import json
 import os
 import re
@@ -26,9 +23,6 @@ _HF_CACHE_DIR_LOGGED = False
 
 
 def _get_hf_cache_dir() -> Path:
-    """HuggingFace model cache directory.
-    Prefer HF_HOME env var; else falls back to project data/hf_cache.
-    """
     global _HF_CACHE_DIR_LOGGED
     raw = os.environ.get("HF_HOME") or os.environ.get("HF_CACHE")
     if raw:
@@ -42,16 +36,8 @@ def _get_hf_cache_dir() -> Path:
         _HF_CACHE_DIR_LOGGED = True
     return path
 
-# Cache for in-process (python_gpu) models: (model_name, cache_key) -> (model, tokenizer)
-# cache_key is device string or tuple of gpu_ids
-# Note: With subprocess isolation, each process has its own cache - no shared state.
 _PYTHON_GPU_MODEL_CACHE: Dict[Tuple[str, Any], Any] = {}
-
-# Cache for judge API: (model, system_prompt) -> UCSFVersaAPI instance (reuse across judge calls).
 _JUDGE_API_CACHE: Dict[Tuple[str, str], Any] = {}
-
-# Log first few generate start/done at INFO for diagnosis
-# Each subprocess has its own counter starting at 0
 _PYTHON_GPU_GENERATE_LOG_COUNT = 0
 
 
@@ -60,22 +46,6 @@ def _get_python_gpu_model(
     device: str = "cuda",
     gpu_ids: Optional[List[int]] = None,
 ) -> Tuple[Any, Any]:
-    """Load Hugging Face model and tokenizer (cached). Requires transformers and torch.
-    Uses project-local cache (data/hf_cache).
-
-    Args:
-        model_name: HuggingFace model name or path.
-        device: 'cuda', 'cuda:N', 'auto', or 'cpu'.
-        gpu_ids: If provided, restrict model to these specific GPU indices using
-                 device_map="auto" with max_memory. E.g. gpu_ids=[0,1] uses cuda:0 and cuda:1.
-                 Takes precedence over device if set.
-
-    Device modes:
-    - device 'cuda': try cuda:0, cuda:1, ... and use first with enough memory; OOM → CPU.
-    - device 'cuda:N': use specific GPU N.
-    - device 'auto': spread model across all GPUs with device_map (requires accelerate).
-    - gpu_ids=[0,1,...]: spread model across specified GPUs only (requires accelerate).
-    """
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         import torch
@@ -84,7 +54,6 @@ def _get_python_gpu_model(
             "python_gpu models require transformers and torch. Install with: pip install transformers torch"
         ) from e
 
-    # Determine cache key
     if gpu_ids is not None and len(gpu_ids) > 0:
         cache_key: Any = tuple(sorted(gpu_ids))
     else:
@@ -94,21 +63,17 @@ def _get_python_gpu_model(
     if key in _PYTHON_GPU_MODEL_CACHE:
         return _PYTHON_GPU_MODEL_CACHE[key]
 
-    # Load model (no lock needed - each subprocess is single-threaded)
     cache_dir = _get_hf_cache_dir()
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_name, trust_remote_code=True, cache_dir=cache_dir
     )
 
-    # Mode 1: Specific GPU subset via gpu_ids (multi-GPU with restriction)
-    # Single-GPU (len(gpu_ids)==1): load on CPU then .to(cuda:X).
     if gpu_ids is not None and len(gpu_ids) > 0:
         if not torch.cuda.is_available():
             logger.warning("gpu_ids specified but CUDA not available; falling back to CPU.")
             device = "cpu"
         elif len(gpu_ids) == 1:
-            # Single GPU: load on CPU then move. low_cpu_mem_usage=False avoids meta tensors.
             target_device = f"cuda:{gpu_ids[0]}"
             logger.info(
                 f"Loading python_gpu model {model_name} on {target_device} (cache: {cache_dir})..."
@@ -125,7 +90,6 @@ def _get_python_gpu_model(
             _PYTHON_GPU_MODEL_CACHE[key] = (model, tokenizer)
             return _PYTHON_GPU_MODEL_CACHE[key]
         else:
-            # Multi-GPU: use device_map="auto" with max_memory (requires accelerate)
             try:
                 import accelerate
             except ImportError:
@@ -157,7 +121,6 @@ def _get_python_gpu_model(
             _PYTHON_GPU_MODEL_CACHE[key] = (model, tokenizer)
             return _PYTHON_GPU_MODEL_CACHE[key]
 
-    # Mode 2: device="auto" - spread across all GPUs
     want_gpu = device.startswith("cuda") or device == "auto"
     if want_gpu and device != "auto" and not torch.cuda.is_available():
         logger.warning("CUDA requested but not available; using CPU (slower).")
@@ -187,7 +150,6 @@ def _get_python_gpu_model(
         _PYTHON_GPU_MODEL_CACHE[key] = (model, tokenizer)
         return _PYTHON_GPU_MODEL_CACHE[key]
 
-    # Mode 3: Single-GPU or CPU - load on CPU then move (low_cpu_mem_usage=False avoids meta tensors)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16 if want_gpu else torch.float32,
@@ -196,7 +158,6 @@ def _get_python_gpu_model(
         low_cpu_mem_usage=False,
     )
     if device != "cpu":
-        # When device is exactly "cuda", try each GPU in order until one has enough memory.
         devices_to_try: List[str] = (
             [f"cuda:{i}" for i in range(torch.cuda.device_count())]
             if device == "cuda"
@@ -220,7 +181,6 @@ def _get_python_gpu_model(
                     continue
                 raise
         else:
-            # All GPUs OOM'd (or single device OOM'd)
             if oom_err:
                 logger.warning(
                     "CUDA OOM on all tried devices; using CPU (slower)."
@@ -234,7 +194,6 @@ def _get_python_gpu_model(
 
 
 def clear_python_gpu_cache() -> None:
-    """Clear the in-process python_gpu model cache to free VRAM (e.g. before loading next model)."""
     _PYTHON_GPU_MODEL_CACHE.clear()
     try:
         import torch
@@ -244,9 +203,187 @@ def clear_python_gpu_cache() -> None:
         pass
 
 
+def _strip_thinking_tags(text: str) -> str:
+    return re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL).strip()
+
+
+async def _vllm_endpoint_call(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    temperature: float = 0,
+    timeout: float = 300.0,
+) -> str:
+    messages = []
+    if "gemma" in model.lower():
+        combined = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        messages.append({"role": "user", "content": combined})
+    else:
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+    est_input_tokens = sum(len(m["content"]) for m in messages) // 4
+    effective_max_tokens = min(max_tokens, max(256, max_context - est_input_tokens - 100))
+
+    for attempt in range(3):
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": effective_max_tokens,
+            }
+            if "qwen3" in model.lower() or "Qwen3" in model:
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
+            resp = await client.post(
+                f"{endpoint}/chat/completions",
+                json=payload,
+                timeout=timeout,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                return _strip_thinking_tags(content)
+            elif resp.status_code == 400:
+                error = resp.json().get("error", {}).get("message", resp.text[:200])
+                if "maximum context length" in error and attempt < 2:
+                    user_prompt = user_prompt[:len(user_prompt) // 2]
+                    messages[-1]["content"] = user_prompt
+                    est_input_tokens = sum(len(m["content"]) for m in messages) // 4
+                    effective_max_tokens = min(max_tokens, max(256, max_context - est_input_tokens - 100))
+                    continue
+                return f"[ERROR_400] {error}"
+            elif resp.status_code in (429, 503):
+                await asyncio.sleep(2 ** attempt)
+                continue
+            else:
+                resp.raise_for_status()
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError,
+                httpx.RemoteProtocolError, httpx.ReadError) as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return f"[ERROR_TIMEOUT] {e}"
+        except Exception as e:
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return f"[ERROR] {type(e).__name__}: {e}"
+    return "[ERROR] Max retries exceeded"
+
+
+def _vllm_endpoint_predict_sync(
+    endpoint: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    timeout: float = 300.0,
+) -> str:
+    async def _inner():
+        async with httpx.AsyncClient() as client:
+            return await _vllm_endpoint_call(
+                client, endpoint, model, system_prompt, user_prompt,
+                max_tokens=max_tokens, max_context=max_context, timeout=timeout,
+            )
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _inner()).result()
+    return asyncio.run(_inner())
+
+
+async def _vllm_endpoint_predict_batch(
+    endpoint: str,
+    model: str,
+    samples: List[Dict[str, Any]],
+    prompts_obj: "BenchmarkPrompts",
+    tokenizer: Any,
+    no_rag_max_tokens: int,
+    max_concurrent: int = 16,
+    max_tokens: int = 2048,
+    max_context: int = 8192,
+    timeout: float = 300.0,
+    prompt_suffix: str = "",
+    checkpoint_callback: Optional[Callable[[int], None]] = None,
+    save_every: int = 50,
+) -> List[str]:
+    """Run async concurrent predictions against a vLLM endpoint."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+    results = [None] * len(samples)
+    completed = 0
+
+    async with httpx.AsyncClient() as client:
+        async def process_one(idx: int, sample: dict):
+            nonlocal completed
+            async with semaphore:
+                preamended_text = str(sample.get("preamended_text", "") or "")
+                evidence = str(sample.get("evidence", "") or "")
+                version_from = sample.get("version_from")
+                version_to = sample.get("version_to")
+                try:
+                    vf = int(float(version_from)) if version_from is not None and not pd.isna(version_from) else None
+                except (ValueError, TypeError):
+                    vf = None
+                try:
+                    vt = int(float(version_to)) if version_to is not None and not pd.isna(version_to) else None
+                except (ValueError, TypeError):
+                    vt = None
+
+                has_document = bool(evidence.strip())
+                user_prompt = _format_model_prompt(
+                    preamended_text, prompts_obj.model_prompt,
+                    has_document=has_document, version_from=vf, version_to=vt,
+                )
+                system_prompt = prompts_obj.model_prompt.get("system", "")
+
+                if evidence.strip():
+                    ev = evidence.strip()
+                    if tokenizer is not None:
+                        enc = tokenizer.encode(ev)
+                        if len(enc) > no_rag_max_tokens:
+                            ev = tokenizer.decode(enc[:no_rag_max_tokens])
+                    else:
+                        max_chars = no_rag_max_tokens * 4
+                        if len(ev) > max_chars:
+                            ev = ev[:max_chars]
+                    user_prompt += f"\n\nSupporting evidence:\n{ev}"
+
+                if prompt_suffix:
+                    user_prompt += f"\n\n{prompt_suffix}"
+
+                try:
+                    prediction = await _vllm_endpoint_call(
+                        client, endpoint, model, system_prompt, user_prompt,
+                        max_tokens=max_tokens, max_context=max_context, timeout=timeout,
+                    )
+                except Exception as e:
+                    prediction = f"[ERROR] {type(e).__name__}: {e}"
+                results[idx] = prediction
+
+        tasks = [process_one(i, s) for i, s in enumerate(samples)]
+        for coro in asyncio.as_completed(tasks):
+            await coro
+            completed += 1
+            if checkpoint_callback and completed % save_every == 0:
+                checkpoint_callback(completed)
+
+    return [r if r is not None else "[ERROR] No result" for r in results]
+
+
 @dataclass
 class PredictionRecord:
-    """Record for a single prediction."""
+    """Single prediction record."""
     id: int
     nct_id: str
     version_from: int
@@ -261,7 +398,7 @@ class PredictionRecord:
 
 @dataclass
 class BenchmarkPrompts:
-    """Benchmark prompts loaded from config."""
+    """Benchmark prompts from config."""
     model_prompt: Dict[str, str]
     judge_prompt: Dict[str, str]
     two_step_prompts: Optional[Dict[str, Dict[str, str]]] = None
@@ -269,7 +406,7 @@ class BenchmarkPrompts:
 
     @classmethod
     def load(cls, config_path: Path) -> "BenchmarkPrompts":
-        """Load prompts from JSON config file."""
+        """Load from JSON config file."""
         if not config_path.exists():
             raise FileNotFoundError(f"Benchmark prompts config not found: {config_path}")
 
@@ -295,19 +432,10 @@ class BenchmarkPrompts:
         )
 
 
-# Path to benchmark prompts config (resolved via project root for consistency)
 BENCHMARK_PROMPTS_PATH = get_project_root() / "config" / "benchmark_prompts.json"
 
 
 def load_benchmark_prompts(prompts_path: Optional[Path] = None) -> BenchmarkPrompts:
-    """Load benchmark prompts from config file.
-    
-    Args:
-        prompts_path: Optional path to prompts file. If None, uses default BENCHMARK_PROMPTS_PATH.
-    
-    Returns:
-        BenchmarkPrompts dataclass instance
-    """
     if prompts_path is None:
         prompts_path = BENCHMARK_PROMPTS_PATH
     return BenchmarkPrompts.load(prompts_path)
@@ -320,19 +448,6 @@ def _format_model_prompt(
     version_from: Optional[int] = None,
     version_to: Optional[int] = None,
 ) -> str:
-    """Format model prompt from templates. Single formatter for both RAG and no-RAG cases.
-    
-    Args:
-        preamended_text: Original eligibility criteria text
-        templates: Dictionary with 'user_template' and optionally 'user_template_rag' keys
-        has_document: If True, use user_template_rag (RAG mode: evidence is retrieved and injected).
-                      If False, use user_template (no-RAG mode: no evidence available).
-        version_from: Optional; ClinicalTrials.gov version number before the change.
-        version_to: Optional; ClinicalTrials.gov version number after the change.
-    
-    Returns:
-        Formatted user prompt string (never contains evidence; evidence is only via document)
-    """
     kwargs: Dict[str, Any] = {"preamended_text": preamended_text}
     if version_from is not None:
         kwargs["version_from"] = version_from
@@ -344,16 +459,6 @@ def _format_model_prompt(
 
 
 def _format_judge_prompt(ground_truth: str, prediction: str, templates: Dict[str, str]) -> str:
-    """Format judge prompt from templates.
-    
-    Args:
-        ground_truth: Target eligibility criteria text
-        prediction: Model prediction text
-        templates: Dictionary with 'system' and 'user_template' keys
-    
-    Returns:
-        Formatted user prompt string
-    """
     return templates["user_template"].format(
         ground_truth=ground_truth,
         prediction=prediction,
@@ -361,22 +466,6 @@ def _format_judge_prompt(ground_truth: str, prediction: str, templates: Dict[str
 
 
 def _parse_judge_scores(response: str, score_scale: str = "0-4") -> Dict[str, float]:
-    """Parse binary and ordinal scores from LLM response.
-    
-    Extracts both binary (0/1) and ordinal (0-4 or 1-10) scores from judge response.
-    Handles various formats:
-    - "1,3" (preferred format: binary,ordinal)
-    - "Binary: 1, Ordinal: 3"
-    - "1 3" or "1, 3" (with spaces)
-    - Falls back to single ordinal score if only one number found
-    
-    Args:
-        response: LLM response text
-        score_scale: Scale string like "0-4" or "1-10" for ordinal score
-    
-    Returns:
-        Dictionary with 'binary_score' (0.0 or 1.0) and 'ordinal_score' (float)
-    """
     if not response or not isinstance(response, str):
         logger.warning(f"Invalid response type for parsing: {type(response)}")
         max_score = 4.0 if score_scale == "0-4" else 10.0
@@ -387,7 +476,6 @@ def _parse_judge_scores(response: str, score_scale: str = "0-4") -> Dict[str, fl
     
     score_str = response.strip()
     
-    # Determine max ordinal score from scale
     if score_scale == "0-4":
         max_ordinal = 4.0
         ordinal_pattern = r'\b([0-4])\b'
@@ -496,9 +584,18 @@ def call_model_with_retry(
         if wait_for_revive_seconds <= 0:
             return False
         try:
-            from recite.crawler.llm import wait_for_server_ready
+            import time as _time
             wait_secs = min(wait_for_revive_seconds, 60)
-            return wait_for_server_ready(endpoint, max_wait_seconds=wait_secs)
+            deadline = _time.monotonic() + wait_secs
+            while _time.monotonic() < deadline:
+                try:
+                    r = httpx.get(f"{endpoint}/models", timeout=5)
+                    if r.status_code == 200:
+                        return True
+                except Exception:
+                    pass
+                _time.sleep(2)
+            return False
         except Exception:
             return False
 
@@ -599,29 +696,10 @@ def _query_with_rag_retry(
     base_delay: float = 0.5,
     max_delay: float = 5.0,
     wait_for_revive_seconds: int = 0,
-    ucsf_versa_model: Optional[str] = None,
+    azure_openai_model: Optional[str] = None,
 ) -> str:
-    """
-    Call query_with_rag in-process with retry logic. On failure, optionally wait for
-    server ready (for self-reviving wrapper) then retry.
-
-    Args:
-        system_prompt: System instructions for the LLM.
-        user_prompt: User question or prompt.
-        document: Evidence document (can be empty string).
-        llm_base_url: Base URL for LLM (e.g. wrapper or vLLM). Ignored when ucsf_versa_model is set.
-        llm_model: Model name for LLM. Ignored when ucsf_versa_model is set.
-        rag_config: Dict with embed_base_url, embed_model, embed_api_key?, embed_api_version?, similarity_top_k?, no_rag?, no_rag_max_tokens?.
-        persist_dir: Directory for LlamaIndex cache.
-        max_retries: Maximum number of retry attempts.
-        base_delay: Base delay in seconds for exponential backoff.
-        wait_for_revive_seconds: If > 0, on connection/server error call wait_for_server_ready before retry (not used when ucsf_versa_model is set).
-        ucsf_versa_model: If set, use UCSF Versa API for chat (ignores llm_base_url/llm_model).
-
-    Returns:
-        LLM response text.
-    """
-    from recite.rag import query_with_rag
+    """Call query_with_rag with retry logic."""
+    raise NotImplementedError("RAG mode not available in this build")
 
     kwargs: Dict[str, Any] = {
         "system_prompt": system_prompt or "",
@@ -641,8 +719,8 @@ def _query_with_rag_retry(
         kwargs["no_rag"] = rag_config["no_rag"]
     if rag_config.get("no_rag_max_tokens") is not None:
         kwargs["no_rag_max_tokens"] = rag_config["no_rag_max_tokens"]
-    if ucsf_versa_model is not None:
-        kwargs["ucsf_versa_model"] = ucsf_versa_model
+    if azure_openai_model is not None:
+        kwargs["azure_openai_model"] = azure_openai_model
     if rag_config.get("embed_local_model"):
         kwargs["embed_local_model"] = rag_config["embed_local_model"]
         kwargs["embed_device_index"] = rag_config.get("embed_device_index", "cuda:0")
@@ -655,11 +733,22 @@ def _query_with_rag_retry(
         except Exception as e:
             last_error = e
             if attempt < max_retries - 1:
-                if wait_for_revive_seconds > 0 and not ucsf_versa_model:
+                if wait_for_revive_seconds > 0 and not azure_openai_model:
                     try:
-                        from recite.crawler.llm import wait_for_server_ready
+                        import time as _time
                         wait_secs = min(wait_for_revive_seconds, 60)
-                        if wait_for_server_ready(llm_base_url, max_wait_seconds=wait_secs):
+                        deadline = _time.monotonic() + wait_secs
+                        revived = False
+                        while _time.monotonic() < deadline:
+                            try:
+                                r = httpx.get(f"{llm_base_url}/models", timeout=5)
+                                if r.status_code == 200:
+                                    revived = True
+                                    break
+                            except Exception:
+                                pass
+                            _time.sleep(2)
+                        if revived:
                             continue
                     except Exception:
                         pass
@@ -851,34 +940,14 @@ def llm_judge_evaluator(
     max_retries: int = 3,
     wait_for_revive_seconds: int = 0,
 ) -> Dict[str, float]:
-    """
-    LLM-as-judge evaluator (endpoint-based).
-    
-    Uses an LLM endpoint to evaluate the quality of the prediction.
-    
-    Args:
-        ground_truth: Target text
-        prediction: Model prediction
-        endpoint: LLM endpoint URL
-        model: Model name/ID
-        prompts: Optional BenchmarkPrompts instance. If None, loads from default config.
-        max_retries: Maximum retry attempts
-        
-    Returns:
-        Dictionary with metrics including:
-        - 'llm_judge_binary': Binary score (0 = not acceptable, 1 = acceptable)
-        - 'llm_judge_score': Ordinal score (0-4 or 1-10)
-        - 'llm_judge_normalized': Normalized ordinal score (0-1)
-        - 'llm_judge_raw_response': Raw response from judge LLM (for debugging/auditing)
-    """
+    """LLM-as-judge evaluator (endpoint-based)."""
     if prompts is None:
         prompts = load_benchmark_prompts()
     
-    # Format prompt using shared formatter
     user_prompt = _format_judge_prompt(ground_truth, prediction, prompts.judge_prompt)
     system_prompt = prompts.judge_prompt.get("system", "")
     score_scale = prompts.judge_prompt.get("score_scale", "0-4")
-    
+
     try:
         response = call_model_with_retry(
             endpoint=endpoint,
@@ -889,93 +958,70 @@ def llm_judge_evaluator(
             wait_for_revive_seconds=wait_for_revive_seconds,
         )
 
-        # Parse both binary and ordinal scores
         scores = _parse_judge_scores(response, score_scale)
         binary_score = scores["binary_score"]
         ordinal_score = scores["ordinal_score"]
-        
-        # Determine max score for normalization
         max_score = 4.0 if score_scale == "0-4" else 10.0
-        
+
         return {
-            "llm_judge_binary": binary_score,  # Binary: acceptable (1) or not (0)
-            "llm_judge_score": ordinal_score,  # Ordinal: quality score (0-4 or 1-10)
-            "llm_judge_normalized": ordinal_score / max_score,  # Normalize ordinal to 0-1
-            "llm_judge_raw_response": response,  # Save raw response for debugging
+            "llm_judge_binary": binary_score,
+            "llm_judge_score": ordinal_score,
+            "llm_judge_normalized": ordinal_score / max_score,
+            "llm_judge_raw_response": response,
         }
-        
+
     except Exception as e:
         logger.error(f"LLM judge evaluation failed: {e}")
         return {
             "llm_judge_binary": 0.0,
             "llm_judge_score": 0.0,
             "llm_judge_normalized": 0.0,
-            "llm_judge_raw_response": None,  # No response on error
+            "llm_judge_raw_response": None,
         }
 
 
-def ucsf_versa_judge_evaluator(
+def azure_openai_judge_evaluator(
     ground_truth: str,
     prediction: str,
     model: str,
     prompts: Optional[BenchmarkPrompts] = None,
 ) -> Dict[str, float]:
-    """
-    UCSF Versa API judge evaluator.
-    
-    Uses UCSFVersaAPI to evaluate the quality of the prediction.
-    
-    Args:
-        ground_truth: Target text
-        prediction: Model prediction
-        model: Model name/ID (must be in UCSFVersaAPI.available_models)
-        prompts: Optional BenchmarkPrompts instance. If None, loads from default config.
-        
-    Returns:
-        Dictionary with metrics including:
-        - 'llm_judge_score': Parsed numeric score
-        - 'llm_judge_normalized': Normalized score (0-1)
-        - 'llm_judge_raw_response': Raw response from judge LLM (for debugging/auditing)
-    """
-    from recite.llmapis import UCSFVersaAPI
+    """Judge evaluator via AzureOpenAIAPI."""
+    from recite.llmapis import AzureOpenAIAPI
     
     if prompts is None:
         prompts = load_benchmark_prompts()
     
-    # Format prompt using shared formatter
     user_prompt = _format_judge_prompt(ground_truth, prediction, prompts.judge_prompt)
     system_prompt = prompts.judge_prompt.get("system", "")
     score_scale = prompts.judge_prompt.get("score_scale", "0-4")
-    
+
     try:
         cache_key = (model, system_prompt)
         if cache_key not in _JUDGE_API_CACHE:
-            _JUDGE_API_CACHE[cache_key] = UCSFVersaAPI(model=model, system_prompt=system_prompt)
+            _JUDGE_API_CACHE[cache_key] = AzureOpenAIAPI(model=model, system_prompt=system_prompt)
         judge_api = _JUDGE_API_CACHE[cache_key]
         response = judge_api(user_prompt, system_prompt=system_prompt)
-        
-        # Parse both binary and ordinal scores
+
         scores = _parse_judge_scores(response, score_scale)
         binary_score = scores["binary_score"]
         ordinal_score = scores["ordinal_score"]
-        
-        # Determine max score for normalization
         max_score = 4.0 if score_scale == "0-4" else 10.0
-        
+
         return {
-            "llm_judge_binary": binary_score,  # Binary: acceptable (1) or not (0)
-            "llm_judge_score": ordinal_score,  # Ordinal: quality score (0-4 or 1-10)
-            "llm_judge_normalized": ordinal_score / max_score,  # Normalize ordinal to 0-1
-            "llm_judge_raw_response": response,  # Save raw response for debugging
+            "llm_judge_binary": binary_score,
+            "llm_judge_score": ordinal_score,
+            "llm_judge_normalized": ordinal_score / max_score,
+            "llm_judge_raw_response": response,
         }
-        
+
     except Exception as e:
-        logger.error(f"UCSF Versa judge evaluation failed: {e}")
+        logger.error(f"Judge evaluation failed: {e}")
         return {
             "llm_judge_binary": 0.0,
             "llm_judge_score": 0.0,
             "llm_judge_normalized": 0.0,
-            "llm_judge_raw_response": None,  # No response on error
+            "llm_judge_raw_response": None,
         }
 
 
@@ -1005,7 +1051,6 @@ def _parse_batched_judge_response(response: str, n: int, score_scale: str = "0-4
         max_score = 4.0 if score_scale == "0-4" else 10.0
         return [{"binary_score": 0.0, "ordinal_score": max_score / 2.0} for _ in range(n)]
     text = response.strip()
-    # Try to extract JSON (may be wrapped in markdown code block)
     json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
     if json_match:
         text = json_match.group(0)
@@ -1041,11 +1086,8 @@ def batched_judge_evaluator(
     prompts: Optional[BenchmarkPrompts] = None,
     batch_size: int = 10,
 ) -> List[Dict[str, float]]:
-    """
-    Evaluate multiple samples in batched API calls (one call per batch).
-    Each returned dict has llm_judge_binary, llm_judge_score, llm_judge_normalized, llm_judge_raw_response.
-    """
-    from recite.llmapis import UCSFVersaAPI
+    """Evaluate multiple samples in batched API calls."""
+    from recite.llmapis import AzureOpenAIAPI
 
     if prompts is None:
         prompts = load_benchmark_prompts()
@@ -1057,7 +1099,7 @@ def batched_judge_evaluator(
     all_metrics = []
     cache_key = (model, system_prompt)
     if cache_key not in _JUDGE_API_CACHE:
-        _JUDGE_API_CACHE[cache_key] = UCSFVersaAPI(model=model, system_prompt=system_prompt)
+        _JUDGE_API_CACHE[cache_key] = AzureOpenAIAPI(model=model, system_prompt=system_prompt)
     judge_api = _JUDGE_API_CACHE[cache_key]
     for start in range(0, len(samples), batch_size):
         batch = samples[start : start + batch_size]
@@ -1094,32 +1136,10 @@ def run_single_sample(
     max_retries: int = 2,
     max_delay: float = 5.0,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Run one sample through the model and evaluators. Used by the orchestrator for
-    sample-centric worker loops. Short retries; returns None on failure.
-
-    Args:
-        sample_row: Dict with id, nct_id, version_from, version_to, preamended_text,
-                    evidence, amended_text; optional quality_score, year, study_type.
-        model: Callable or dict (ucsf_versa / endpoint) as in run_benchmark.
-        rag_config: Required for dict models. embed_base_url, embed_model, persist_dir, etc.
-        evaluator_type: 'default' or 'llm_judge'.
-        evaluator_config: Required if evaluator_type == 'llm_judge'.
-        prompts_path: Path to benchmark prompts JSON.
-        split_name: Split name (train/val/test) for result row.
-        two_step: If True, use two-step flow (endpoint only).
-        wait_for_revive_seconds: Seconds to wait for server before retry.
-        max_retries: Retry attempts for _query_with_rag_retry.
-        max_delay: Max delay in seconds for backoff.
-
-    Returns:
-        Result dict with id, split_name, nct_id, ..., prediction, metrics, predicted_at;
-        or None on failure.
-    """
+    """Run one sample through the model and evaluators. Returns None on failure."""
     prompts = load_benchmark_prompts(prompts_path)
     use_two_step = two_step and prompts.two_step_prompts is not None
 
-    # Coerce row values (may come from pandas)
     def _v(key: str, default: Any = None) -> Any:
         val = sample_row.get(key, default)
         if val is None or (hasattr(pd, "isna") and pd.isna(val)):
@@ -1137,14 +1157,13 @@ def run_single_sample(
         return val
 
     try:
-        # Build model callable (UCSF Versa or endpoint)
         if callable(model):
             model_callable = model
             is_endpoint = False
             use_two_step = False
-        elif isinstance(model, dict) and model.get("api_type") == "ucsf_versa" and "model" in model:
+        elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
             if rag_config is None:
-                raise ValueError("rag_config required for UCSF Versa model")
+                raise ValueError("rag_config required for azure_openai model")
             persist_dir_raw = rag_config.get("persist_dir")
             if persist_dir_raw is None:
                 raise ValueError("rag_config must include persist_dir")
@@ -1156,8 +1175,8 @@ def run_single_sample(
                 rag_cfg["similarity_top_k"] = model["top_k"]
             elif rag_cfg.get("similarity_top_k") is None and rag_cfg.get("top_k") is not None:
                 rag_cfg["similarity_top_k"] = rag_cfg["top_k"]
-            ucsf_versa_model = model["model"]
-            endpoint, llm_model = "n/a", ucsf_versa_model
+            azure_openai_model = model["model"]
+            endpoint, llm_model = "n/a", azure_openai_model
 
             def _call(
                 preamended_text: str,
@@ -1183,7 +1202,7 @@ def run_single_sample(
                     base_delay=0.5,
                     max_delay=max_delay,
                     wait_for_revive_seconds=wait_for_revive_seconds,
-                    ucsf_versa_model=ucsf_versa_model,
+                    azure_openai_model=azure_openai_model,
                 )
             model_callable = _call
             is_endpoint = True
@@ -1231,7 +1250,6 @@ def run_single_sample(
             model_callable = _call
             is_endpoint = True
         elif isinstance(model, dict) and model.get("api_type") == "python_gpu" and "model" in model:
-            # In-process GPU model via Hugging Face Transformers (PyTorch)
             import torch
             model_name = model["model"]
             device = model.get("device", "cuda")
@@ -1242,10 +1260,9 @@ def run_single_sample(
             no_rag_max_tokens = model.get("no_rag_max_tokens")
             if no_rag_max_tokens is None and context_window is not None:
                 no_rag_max_tokens = max(0, ctx_tokens - 4096)
-            # Ensure tiny models always have a safe evidence cap: leave room for system + user + generation
             if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
                 no_rag_max_tokens = 512
-            no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))  # room for prompt + max_new_tokens
+            no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
 
             def _call(
                 preamended_text: str,
@@ -1277,39 +1294,36 @@ def run_single_sample(
                     tokenizer.model_max_length or 131072,
                     ctx_tokens,
                 )
-                try:
-                    prompt_ids = tokenizer.apply_chat_template(
-                        messages,
+                def _apply_template_ids(msgs):
+                    """Apply chat template and return input_ids tensor."""
+                    result = tokenizer.apply_chat_template(
+                        msgs,
                         add_generation_prompt=True,
                         return_tensors="pt",
                         truncation=True,
                         max_length=max_len,
                     )
+                    if hasattr(result, "keys") and "input_ids" in result:
+                        return result["input_ids"]
+                    return result
+
+                try:
+                    prompt_ids = _apply_template_ids(messages)
                 except Exception as template_err:
-                    # Gemma 2 and some other models don't support "system" in chat template
                     if "system" in str(template_err).lower() or "TemplateError" in type(template_err).__name__:
                         messages_user_only = [
                             {"role": "user", "content": f"{system_prompt}\n\n{user_content}".strip() if system_prompt else user_content},
                         ]
-                        prompt_ids = tokenizer.apply_chat_template(
-                            messages_user_only,
-                            add_generation_prompt=True,
-                            return_tensors="pt",
-                            truncation=True,
-                            max_length=max_len,
-                        )
+                        prompt_ids = _apply_template_ids(messages_user_only)
                     else:
                         logger.warning(f"python_gpu generate failed: {template_err}")
                         raise
-                # Clamp to model max length (tokenizer may not truncate reliably)
                 seq_len = prompt_ids.shape[1]
                 if seq_len > max_len:
                     prompt_ids = prompt_ids[:, -max_len:]
                 try:
                     prompt_ids = prompt_ids.to(hf_model.device)
-                    # All ones for single sequence (no padding); avoids "attention mask not set" warning.
                     attention_mask = prompt_ids.new_ones(prompt_ids.shape, dtype=torch.long)
-                    # Log first few calls at INFO for diagnosis (each subprocess has its own counter)
                     n = _PYTHON_GPU_GENERATE_LOG_COUNT
                     if n < 8:
                         logger.info("python_gpu: generate start (prompt_len={}, call#={})", prompt_ids.shape[1], n + 1)
@@ -1330,8 +1344,62 @@ def run_single_sample(
                     raise
             model_callable = _call
             is_endpoint = True
+        elif isinstance(model, dict) and model.get("api_type") == "vllm_endpoint" and "model" in model:
+            vllm_model_name = model["model"]
+            vllm_endpoint = model["endpoint"]
+            vllm_max_tokens = int(model.get("max_tokens", 2048))
+            vllm_max_context = int(model.get("context_window", 8192))
+            vllm_timeout = float(model.get("timeout", 300.0))
+            vllm_prompt_suffix = model.get("prompt_suffix", "")
+            context_window = model.get("context_window")
+            ctx_tokens = int(context_window) if context_window is not None else 8192
+            no_rag_max_tokens = model.get("no_rag_max_tokens")
+            if no_rag_max_tokens is None and context_window is not None:
+                no_rag_max_tokens = max(0, ctx_tokens - 4096)
+            if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+                no_rag_max_tokens = 512
+            no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+            vllm_tokenizer = None
+            try:
+                from transformers import AutoTokenizer
+                vllm_tokenizer = AutoTokenizer.from_pretrained(vllm_model_name)
+            except Exception:
+                logger.debug("vllm_endpoint: tokenizer not available for {}, using char-based truncation", vllm_model_name)
+
+            def _call(
+                preamended_text: str,
+                evidence: str,
+                version_from: Optional[int] = None,
+                version_to: Optional[int] = None,
+            ) -> str:
+                has_document = evidence is not None and bool(evidence.strip())
+                user_prompt = _format_model_prompt(
+                    preamended_text, prompts.model_prompt,
+                    has_document=has_document, version_from=version_from, version_to=version_to,
+                )
+                system_prompt = prompts.model_prompt.get("system", "")
+                if evidence and evidence.strip():
+                    ev = evidence.strip()
+                    if vllm_tokenizer is not None:
+                        enc = vllm_tokenizer.encode(ev)
+                        if len(enc) > no_rag_max_tokens:
+                            ev = vllm_tokenizer.decode(enc[:no_rag_max_tokens])
+                    else:
+                        max_chars = no_rag_max_tokens * 4
+                        if len(ev) > max_chars:
+                            ev = ev[:max_chars]
+                    user_prompt += f"\n\nSupporting evidence:\n{ev}"
+                if vllm_prompt_suffix:
+                    user_prompt += f"\n\n{vllm_prompt_suffix}"
+                return _vllm_endpoint_predict_sync(
+                    vllm_endpoint, vllm_model_name, system_prompt, user_prompt,
+                    max_tokens=vllm_max_tokens, max_context=vllm_max_context,
+                    timeout=vllm_timeout,
+                )
+            model_callable = _call
+            is_endpoint = True
         else:
-            raise ValueError("model must be a callable or dict with api_type ucsf_versa, endpoint/model, or python_gpu")
+            raise ValueError("model must be a callable or dict with api_type azure_openai, endpoint/model, python_gpu, or vllm_endpoint")
 
         # Get prediction
         preamended_text = sample_row.get("preamended_text") or ""
@@ -1359,7 +1427,7 @@ def run_single_sample(
                 base_delay=0.5,
                 max_delay=max_delay,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "ucsf_versa" else None,
+                azure_openai_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "azure_openai" else None,
             )
             step2_user = tsp["step2_user_template"].format(
                 schema=schema_text, version_from=version_from, version_to=version_to, preamended_text=preamended_text,
@@ -1377,7 +1445,7 @@ def run_single_sample(
                 base_delay=0.5,
                 max_delay=max_delay,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "ucsf_versa" else None,
+                azure_openai_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "azure_openai" else None,
             )
         else:
             prediction = _call_model_with_truncation_retry(
@@ -1393,8 +1461,8 @@ def run_single_sample(
         default_metrics = default_evaluator(amended_text, prediction)
         if evaluator_type == "llm_judge" and evaluator_config:
             api_type = evaluator_config.get("api_type", "endpoint")
-            if api_type == "ucsf_versa" and "model" in evaluator_config:
-                llm_judge_metrics = ucsf_versa_judge_evaluator(
+            if api_type == "azure_openai" and "model" in evaluator_config:
+                llm_judge_metrics = azure_openai_judge_evaluator(
                     amended_text, prediction,
                     model=evaluator_config["model"],
                     prompts=prompts,
@@ -1462,59 +1530,27 @@ def run_benchmark(
     done_sample_ids: Optional[Dict[str, Set[int]]] = None,
     max_concurrent_requests: int = 1,
 ) -> Dict[str, Any]:
-    """
-    Run benchmark evaluation on parquet files.
-
-    Endpoint-based model uses RAG in-process: query_with_rag with llm_base_url=model.endpoint,
-    llm_model=model.model, and embed config from rag_config. vLLM (or wrapper) is used for LLM only.
-
-    Args:
-        model: Either a callable function(preamended_text: str, evidence: str) -> str,
-               or a dict with 'endpoint' and 'model' keys for endpoint-based in-process RAG.
-               Example: {"endpoint": "http://localhost:8001/v1", "model": "llama-3.1-8b"}
-        parquet_paths: Dictionary with 'train', 'val', 'test' keys mapping to parquet file paths.
-        output_dir: Directory to save predictions and results.
-        evaluator_type: Type of evaluator ('default' or 'llm_judge').
-        evaluator_config: Optional configuration for LLM judge evaluator (required if evaluator_type == 'llm_judge').
-        batch_size: Number of samples to process before saving (for checkpointing).
-        num_samples: Optional limit on number of samples per split.
-        prompts_path: Optional path to benchmark prompts config file.
-        two_step: If True, use two-step flow (schema then amended EC). Requires endpoint-based model.
-        rag_config: Required for endpoint-based model. Dict with embed_base_url, embed_model, persist_dir,
-                    and optionally embed_api_key, embed_api_version, similarity_top_k. persist_dir can be
-                    relative to project root.
-        wait_for_revive_seconds: If > 0, on RAG/LLM failure wait up to this many seconds for server ready before retry.
-        done_sample_ids: Optional. When continuing a run, dict of split_name -> set of sample ids already evaluated.
-                         Only those samples not in this set are run; results are merged with existing files.
-        max_concurrent_requests: When > 1, process samples in chunks of this size in parallel; wait for chunk, write, then next chunk. 1 = sequential.
-
-    Returns:
-        Dictionary with evaluation results and statistics
-    """
+    """Run benchmark evaluation on parquet files."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load prompts (used for both model and judge)
     prompts = load_benchmark_prompts(prompts_path)
 
     use_two_step = two_step and prompts.two_step_prompts is not None
 
-    # Determine if model is callable or endpoint-based
     if callable(model):
         model_callable = model
         is_endpoint = False
         if use_two_step:
             logger.warning("two_step=True requires endpoint-based model; using single-step for callable")
             use_two_step = False
-    elif isinstance(model, dict) and model.get("api_type") == "ucsf_versa" and "model" in model:
-        # UCSF Versa API: chat completions via UCSFVersaAPI (no local endpoint)
-        ucsf_versa_model = model["model"]
+    elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
+        azure_openai_model = model["model"]
         endpoint = "n/a"
-        llm_model = ucsf_versa_model
+        llm_model = azure_openai_model
         is_endpoint = True
         if rag_config is None:
             raise ValueError(
-                "rag_config required for UCSF Versa model (embed_base_url, embed_model, persist_dir). "
-                "Load from config/benchmarks.yaml rag section or env (UCSF_*, RAG_EMBED_*)."
+                "rag_config required for azure_openai model (embed_base_url, embed_model, persist_dir)."
             )
         persist_dir_raw = rag_config.get("persist_dir")
         if persist_dir_raw is None:
@@ -1552,7 +1588,153 @@ def run_benchmark(
                 rag_config=rag_cfg,
                 persist_dir=persist_dir,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=ucsf_versa_model,
+                azure_openai_model=azure_openai_model,
+            )
+    elif isinstance(model, dict) and model.get("api_type") == "python_gpu" and "model" in model:
+        import torch
+        model_name = model["model"]
+        device = model.get("device", "cuda")
+        gpu_ids = model.get("gpu_ids")
+        gpus = model.get("gpus")
+        if gpu_ids is None and gpus is not None and int(gpus) > 1:
+            gpu_ids = list(range(int(gpus)))
+        hf_model, tokenizer = _get_python_gpu_model(model_name, device, gpu_ids=gpu_ids)
+        context_window = model.get("context_window")
+        ctx_tokens = int(context_window) if context_window is not None else 131072
+        no_rag_max_tokens = model.get("no_rag_max_tokens")
+        if no_rag_max_tokens is None and context_window is not None:
+            no_rag_max_tokens = max(0, ctx_tokens - 4096)
+        if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+            no_rag_max_tokens = 512
+        no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+        is_endpoint = False
+
+        def model_callable(
+            preamended_text: str,
+            evidence: str,
+            version_from: Optional[int] = None,
+            version_to: Optional[int] = None,
+        ) -> str:
+            global _PYTHON_GPU_GENERATE_LOG_COUNT
+            has_document = evidence is not None and bool(evidence.strip())
+            user_prompt = _format_model_prompt(
+                preamended_text, prompts.model_prompt,
+                has_document=has_document, version_from=version_from, version_to=version_to,
+            )
+            system_prompt = prompts.model_prompt.get("system", "")
+            if evidence and evidence.strip():
+                ev = evidence.strip()
+                enc = tokenizer.encode(ev)
+                if len(enc) > no_rag_max_tokens:
+                    ev = tokenizer.decode(enc[:no_rag_max_tokens])
+                user_content = f"{user_prompt}\n\nSupporting evidence:\n{ev}"
+            else:
+                user_content = user_prompt
+            system_prompt = (system_prompt or "").strip()
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ]
+            max_len = min(
+                tokenizer.model_max_length or 131072,
+                ctx_tokens,
+            )
+            def _apply_template_ids(msgs):
+                result = tokenizer.apply_chat_template(
+                    msgs, add_generation_prompt=True, return_tensors="pt",
+                    truncation=True, max_length=max_len,
+                )
+                if hasattr(result, "keys") and "input_ids" in result:
+                    return result["input_ids"]
+                return result
+
+            try:
+                prompt_ids = _apply_template_ids(messages)
+            except Exception as template_err:
+                if "system" in str(template_err).lower() or "TemplateError" in type(template_err).__name__:
+                    messages_user_only = [
+                        {"role": "user", "content": f"{system_prompt}\n\n{user_content}".strip() if system_prompt else user_content},
+                    ]
+                    prompt_ids = _apply_template_ids(messages_user_only)
+                else:
+                    raise
+            seq_len = prompt_ids.shape[1]
+            if seq_len > max_len:
+                prompt_ids = prompt_ids[:, -max_len:]
+            prompt_ids = prompt_ids.to(hf_model.device)
+            attention_mask = prompt_ids.new_ones(prompt_ids.shape, dtype=torch.long)
+            n = _PYTHON_GPU_GENERATE_LOG_COUNT
+            if n < 8:
+                logger.info("python_gpu: generate start (prompt_len={}, call#={})", prompt_ids.shape[1], n + 1)
+            out = hf_model.generate(
+                prompt_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=2048,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id,
+            )
+            _PYTHON_GPU_GENERATE_LOG_COUNT = n + 1
+            if n < 8:
+                logger.info("python_gpu: generate done (out_len={}, call#={})", out.shape[1], n + 1)
+            gen = out[0][prompt_ids.shape[1]:]
+            return tokenizer.decode(gen, skip_special_tokens=True).strip()
+    elif isinstance(model, dict) and model.get("api_type") == "vllm_endpoint" and "model" in model:
+        vllm_model_name = model["model"]
+        vllm_endpoint = model["endpoint"]
+        vllm_max_tokens = int(model.get("max_tokens", 2048))
+        vllm_max_context = int(model.get("context_window", 8192))
+        vllm_timeout = float(model.get("timeout", 300.0))
+        vllm_prompt_suffix = model.get("prompt_suffix", "")
+        vllm_max_concurrent = int(model.get("max_concurrent", 16))
+        vllm_save_every = int(model.get("save_every", 50))
+        context_window = model.get("context_window")
+        ctx_tokens = int(context_window) if context_window is not None else 8192
+        no_rag_max_tokens = model.get("no_rag_max_tokens")
+        if no_rag_max_tokens is None and context_window is not None:
+            no_rag_max_tokens = max(0, ctx_tokens - 4096)
+        if no_rag_max_tokens is None or no_rag_max_tokens <= 0:
+            no_rag_max_tokens = 512
+        no_rag_max_tokens = min(no_rag_max_tokens, max(256, ctx_tokens - 2048 - 512))
+        vllm_tokenizer = None
+        try:
+            from transformers import AutoTokenizer
+            vllm_tokenizer = AutoTokenizer.from_pretrained(vllm_model_name)
+            logger.info("vllm_endpoint: tokenizer loaded ({})", vllm_model_name)
+        except Exception:
+            logger.info("vllm_endpoint: tokenizer not available for {}, using char-based truncation", vllm_model_name)
+        logger.info("vllm_endpoint: model={}, endpoint={}, ctx={}, evidence_budget={}, concurrent={}",
+                     vllm_model_name, vllm_endpoint, ctx_tokens, no_rag_max_tokens, vllm_max_concurrent)
+        is_endpoint = False
+
+        def model_callable(
+            preamended_text: str,
+            evidence: str,
+            version_from: Optional[int] = None,
+            version_to: Optional[int] = None,
+        ) -> str:
+            has_document = evidence is not None and bool(evidence.strip())
+            user_prompt = _format_model_prompt(
+                preamended_text, prompts.model_prompt,
+                has_document=has_document, version_from=version_from, version_to=version_to,
+            )
+            system_prompt = prompts.model_prompt.get("system", "")
+            if evidence and evidence.strip():
+                ev = evidence.strip()
+                if vllm_tokenizer is not None:
+                    enc = vllm_tokenizer.encode(ev)
+                    if len(enc) > no_rag_max_tokens:
+                        ev = vllm_tokenizer.decode(enc[:no_rag_max_tokens])
+                else:
+                    max_chars = no_rag_max_tokens * 4
+                    if len(ev) > max_chars:
+                        ev = ev[:max_chars]
+                user_prompt += f"\n\nSupporting evidence:\n{ev}"
+            if vllm_prompt_suffix:
+                user_prompt += f"\n\n{vllm_prompt_suffix}"
+            return _vllm_endpoint_predict_sync(
+                vllm_endpoint, vllm_model_name, system_prompt, user_prompt,
+                max_tokens=vllm_max_tokens, max_context=vllm_max_context,
+                timeout=vllm_timeout,
             )
     elif isinstance(model, dict) and "endpoint" in model and "model" in model:
         endpoint = model["endpoint"]
@@ -1560,17 +1742,14 @@ def run_benchmark(
         is_endpoint = True
         if rag_config is None:
             raise ValueError(
-                "rag_config required for endpoint-based model (embed_base_url, embed_model, persist_dir). "
-                "Load from config/benchmarks.yaml rag section or env (UCSF_*, RAG_EMBED_*)."
+                "rag_config required for endpoint-based model (embed_base_url, embed_model, persist_dir)."
             )
-        # Resolve persist_dir relative to project root
         persist_dir_raw = rag_config.get("persist_dir")
         if persist_dir_raw is None:
             raise ValueError("rag_config must include persist_dir")
         persist_dir = Path(persist_dir_raw)
         if not persist_dir.is_absolute():
             persist_dir = get_project_root() / persist_dir
-        # Merge model-level top_k into rag_config for _query_with_rag_retry
         rag_cfg = dict(rag_config)
         if model.get("top_k") is not None:
             rag_cfg["similarity_top_k"] = model["top_k"]
@@ -1603,22 +1782,19 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
     else:
-        raise ValueError("model must be either a callable or a dict with 'endpoint' and 'model' keys")
+        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'azure_openai'/'vllm_endpoint'")
     
-    # Load parquet files
     splits = {}
     required_columns = ["preamended_text", "evidence", "amended_text", "id", "nct_id", "version_from", "version_to"]
-    
+
     for split_name, path in parquet_paths.items():
         if path.exists():
             df = pd.read_parquet(path)
-            
-            # Validate required columns
+
             missing_cols = [col for col in required_columns if col not in df.columns]
             if missing_cols:
                 raise ValueError(f"Parquet file {path} missing required columns: {missing_cols}")
             
-            # Apply num_samples limit if specified
             if num_samples is not None:
                 if num_samples < 0:
                     raise ValueError(f"num_samples must be non-negative, got {num_samples}")
@@ -1626,7 +1802,6 @@ def run_benchmark(
                 df = df.head(num_samples)
                 logger.info(f"Limiting {split_name} split to first {len(df)} samples (from {original_len})")
             
-            # Continuation: filter to samples not yet evaluated
             if done_sample_ids:
                 done = done_sample_ids.get(split_name, set())
                 if done:
@@ -1641,30 +1816,24 @@ def run_benchmark(
     if not splits:
         raise ValueError("No valid parquet files found")
     
-    # Prepare evaluators
-    # Default evaluator always runs (provides BLEU, ROUGE, edit distance, etc.)
     default_eval_fn = default_evaluator
-    
-    # LLM judge evaluator (optional, added when evaluator_type == "llm_judge")
     llm_judge_eval_fn = None
     if evaluator_type == "llm_judge":
         if not evaluator_config:
             raise ValueError("llm_judge evaluator requires evaluator_config")
         
-        api_type = evaluator_config.get("api_type", "endpoint")  # Default to endpoint for backward compat
-        
-        if api_type == "ucsf_versa":
-            # UCSF Versa API judge
+        api_type = evaluator_config.get("api_type", "endpoint")
+
+        if api_type == "azure_openai":
             if "model" not in evaluator_config:
-                raise ValueError("ucsf_versa judge requires 'model' in evaluator_config")
+                raise ValueError("azure_openai judge requires 'model' in evaluator_config")
             judge_model = evaluator_config["model"]
-            llm_judge_eval_fn = lambda gt, pred: ucsf_versa_judge_evaluator(
+            llm_judge_eval_fn = lambda gt, pred: azure_openai_judge_evaluator(
                 gt, pred,
                 model=judge_model,
                 prompts=prompts,
             )
         elif api_type == "endpoint":
-            # Endpoint-based judge
             if "endpoint" not in evaluator_config or "model" not in evaluator_config:
                 raise ValueError("endpoint judge requires 'endpoint' and 'model' in evaluator_config")
             llm_judge_eval_fn = lambda gt, pred: llm_judge_evaluator(
@@ -1675,16 +1844,14 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
         else:
-            raise ValueError(f"Unknown api_type '{api_type}' in evaluator_config. Use 'ucsf_versa' or 'endpoint'")
+            raise ValueError(f"Unknown api_type '{api_type}' in evaluator_config. Use 'azure_openai' or 'endpoint'")
     elif evaluator_type != "default":
         raise ValueError(f"Unknown evaluator_type: {evaluator_type}. Use 'default' or 'llm_judge'")
     
-    # Run evaluation for each split
     all_results = {}
     all_predictions = []
-    
+
     for split_name, df in splits.items():
-        # Continuation: split already fully done — load existing and set all_results
         if len(df) == 0 and done_sample_ids:
             existing_results = _load_existing_results(output_dir, split_name)
             if existing_results:
@@ -1717,7 +1884,6 @@ def run_benchmark(
         done_this_run: Set[int] = set(done_sample_ids.get(split_name, set())) if done_sample_ids else set()
 
         def _run_one_row(row_index: int) -> Tuple[PredictionRecord, Dict[str, Any]]:
-            """Process one sample (used in chunked parallel path). Captures outer scope."""
             row = df.iloc[row_index]
             if use_two_step and is_endpoint:
                 tsp = prompts.two_step_prompts
@@ -1798,14 +1964,12 @@ def run_benchmark(
             return (pred_record, result_dict)
 
         if max_concurrent_requests <= 1:
-            # Sequential path (original loop)
             for sample_idx, (idx, row) in enumerate(df.iterrows()):
                 try:
                     logger.debug(
                         "Starting %s sample %s/%s",
                         split_name, sample_idx + 1, total_in_split,
                     )
-                    # Call model (two-step: schema then amended EC, or single-step)
                     if use_two_step and is_endpoint:
                         tsp = prompts.two_step_prompts
                         evidence_str = row["evidence"] if row["evidence"] is not None else ""
@@ -1864,7 +2028,6 @@ def run_benchmark(
                         "Sample %s/%s done",
                         sample_idx + 1, total_in_split,
                     )
-                    # Create prediction record
                     metadata = {
                         "quality_score": float(row.get("quality_score", 0)) if pd.notna(row.get("quality_score")) else None,
                         "year": int(row.get("year", 0)) if pd.notna(row.get("year")) else None,
@@ -1904,14 +2067,14 @@ def run_benchmark(
                         _save_predictions_checkpoint(predictions, output_dir, split_name)
                 except Exception as e:
                     logger.error(
-                        "Error processing sample id=%s nct_id=%s: %s",
+                        "Error processing sample id={} nct_id={}: {}",
                         row.get("id", idx),
                         row.get("nct_id", "?"),
                         e,
                     )
+                    logger.debug("Traceback:\n{}", traceback.format_exc())
                     continue
         else:
-            # Chunked parallel path
             for chunk_start in range(0, len(df), max_concurrent_requests):
                 chunk_end = min(chunk_start + max_concurrent_requests, len(df))
                 chunk_indices = list(range(chunk_start, chunk_end))
@@ -1940,9 +2103,11 @@ def run_benchmark(
                     if sid in existing_preds:
                         chunk_predictions.append(existing_preds[sid])
                         chunk_results.append(existing_res[sid])
-                    else:
+                    elif i in results_by_index:
                         chunk_predictions.append(results_by_index[i][0])
                         chunk_results.append(results_by_index[i][1])
+                    else:
+                        continue
                 predictions.extend(chunk_predictions)
                 results.extend(chunk_results)
                 if chunk_start == 0 and not done_this_run:
@@ -1953,7 +2118,6 @@ def run_benchmark(
                     _append_results_chunk(chunk_results, output_dir, split_name)
                 done_this_run.update(int(df.iloc[i]["id"]) for i in chunk_indices)
 
-        # Merge with existing when continuing; then save and set all_results
         if done_sample_ids:
             existing_preds = _load_existing_predictions(output_dir, split_name)
             existing_res = _load_existing_results(output_dir, split_name)
@@ -2009,7 +2173,6 @@ def run_benchmark(
                     },
                 }
     
-    # Save summary (total_predictions = sum of split counts when continuing)
     total_count = sum(all_results[s]["count"] for s in all_results) if all_results else len(all_predictions)
     summary = {
         "timestamp": datetime.now().isoformat(),
@@ -2144,11 +2307,6 @@ def _save_predictions(predictions: List[PredictionRecord], output_dir: Path, spl
 
 
 def _save_results(results: List[Dict[str, Any]], output_dir: Path, split_name: str):
-    """Save individual evaluation results to JSONL file.
-    
-    Includes both processed scores (llm_judge_score, llm_judge_normalized) 
-    and raw judge responses (llm_judge_raw_response) for debugging/auditing.
-    """
     results_path = output_dir / f"results_{split_name}.jsonl"
     with open(results_path, "w") as f:
         for result in results:

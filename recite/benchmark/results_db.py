@@ -1,9 +1,4 @@
-"""
-Benchmark results SQLite: configs table + per-config result tables.
-
-Stores experiment configs (with content-addressed id/fingerprint) and one results
-table per config. Matching uses config_fingerprint or multi-field comparison.
-"""
+"""Benchmark results SQLite storage with content-addressed configs."""
 
 import hashlib
 import json
@@ -67,7 +62,7 @@ def _normalize_path_string(s: str) -> str:
     """Resolve to absolute path and lowercase so path case does not change fingerprint.
 
     Same logical path with different case (e.g. .../Projects/... vs .../projects/...)
-    yields the same config_id so existing results are reused and Versa API is not re-called.
+    yields the same config_id so existing results are reused and the API is not re-called.
     """
     if not s or not isinstance(s, str):
         return s

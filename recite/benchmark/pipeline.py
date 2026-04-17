@@ -1,8 +1,4 @@
-"""
-Pipeline orchestrator for RECITE benchmark.
-
-Orchestrates the full E2E pipeline with progressive filtering.
-"""
+"""Pipeline orchestrator for RECITE benchmark."""
 
 import json
 import sqlite3
@@ -26,7 +22,7 @@ from recite.benchmark.utils import (
     get_trials_with_protocols,
     get_trials_with_versions,
 )
-from recite.crawler.adapters import ClinicalTrialsGovAdapter
+from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
 
 def run_e2e_pipeline(

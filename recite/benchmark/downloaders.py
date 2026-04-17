@@ -1,13 +1,9 @@
-"""
-Downloaders module for RECITE benchmark.
-
-Handles downloading trial versions and protocol PDFs.
-"""
+"""Download trial versions and protocol PDFs."""
 
 import json
 import sqlite3
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from loguru import logger
 
@@ -16,7 +12,7 @@ from recite.benchmark.api_client import (
     fetch_version_data,
     fetch_version_history,
 )
-from recite.crawler.adapters import ClinicalTrialsGovAdapter
+from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
 
 def download_versions(

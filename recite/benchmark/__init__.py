@@ -1,5 +1,1 @@
-"""
-RECITE Benchmark Module
-
-RECITE = Revising Eligibility Criteria using Textual Evidence
-"""
+"""RECITE benchmark module."""

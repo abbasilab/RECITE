@@ -1,8 +1,4 @@
-"""
-Builders module for RECITE benchmark.
-
-Handles building final RECITE benchmark instances.
-"""
+"""Build RECITE benchmark instances."""
 
 import sqlite3
 from typing import Optional

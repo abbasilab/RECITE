@@ -1,8 +1,4 @@
-"""
-Protocol PDF parser for RECITE benchmark.
-
-Extracts amendment tables, EC changes, and rationales from protocol PDFs.
-"""
+"""Protocol PDF parser for amendment tables and EC changes."""
 
 import json
 import re
@@ -591,10 +587,6 @@ def match_ec_to_amendment(
     """
     if not amendment_table:
         return None
-    
-    # Try to match by version numbers or dates
-    # For now, return the most recent amendment (last in table)
-    # TODO: Implement better matching logic based on dates/versions
     
     # Get amendment closest to version_to
     matched = None

@@ -1,12 +1,10 @@
-"""
-recite CLI: root app with crawl and benchmark sub-commands.
-"""
+"""recite CLI."""
 import typer
 from dotenv import load_dotenv
 
 from recite.utils.logging_config import configure_logging
 
-load_dotenv()  # Load .env so UCSF_* and other vars are available for serve/crawl/benchmark
+load_dotenv()
 
 app = typer.Typer(name="recite", help="RECITE: Revising Eligibility Criteria Incorporating Textual Evidence.")
 
@@ -31,9 +29,7 @@ def _ensure_logging(
 
 
 def _register_subapps():
-    from recite.cli import crawl as crawl_mod
     from recite.cli import benchmark as benchmark_mod
-    app.add_typer(crawl_mod.app, name="crawl")
     app.add_typer(benchmark_mod.app, name="benchmark")
 
 

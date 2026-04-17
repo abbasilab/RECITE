@@ -3,7 +3,7 @@ name = "recite"
 version = "0.1.0"
 description = "RECITE: Revising Eligibility Criteria Incorporating Textual Evidence"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "CC-BY-NC-SA-4.0"}
 requires-python = ">=3.12"
 authors = [
     {name = "Abbasi Lab, UCSF"},
@@ -53,4 +53,5 @@ testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests (may require API keys)",
     "slow: slow tests",
+    "network: tests that require network access (live API calls)",
 ]

@@ -1,13 +1,12 @@
-"""
-benchmark.py
-"""
+"""Benchmark CLI commands."""
 
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, Generator, List, Optional, Set, Union
 
 import typer
 import yaml
@@ -21,21 +20,28 @@ from recite.utils.path_loader import get_project_root
 app = typer.Typer()
 
 
+@contextmanager
+def _managed_connection(db_path: Optional[Path] = None) -> Generator:
+    """Context manager for database connection."""
+    conn = get_connection(db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def download_all_trial_versions(
     nct_ids: Optional[List[str]] = None,
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download all trial versions.
-    """
+    """Download all trial versions from ClinicalTrials.gov."""
     from recite.benchmark.downloaders import download_versions
-    
-    conn = get_connection(db_path)
+
     if nct_ids is None:
         nct_ids = _load_nct_ids(None, max_trials)
-    download_versions(nct_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_versions(nct_ids, max_trials, conn)
 
 
 def download_trial_eligibility_criteria(
@@ -43,30 +49,24 @@ def download_trial_eligibility_criteria(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download trial eligibility criteria.
-    """
+    """Download trial eligibility criteria."""
     from recite.benchmark.downloaders import download_ecs
-    
-    conn = get_connection(db_path)
+
     if nct_ids is None:
         nct_ids = _load_nct_ids(None, max_trials)
-    download_ecs(nct_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_ecs(nct_ids, max_trials, conn)
 
 
 def identify_trials_with_eligibility_criteria_amendments(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Identify trials with eligibility criteria amendments.
-    """
+    """Identify trials with eligibility criteria amendments."""
     from recite.benchmark.processors import identify_amendments
-    
-    conn = get_connection(db_path)
-    identify_amendments(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        identify_amendments(max_trials, conn)
 
 
 def download_full_trial(
@@ -74,30 +74,24 @@ def download_full_trial(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download full trial protocol PDFs.
-    """
+    """Download full trial protocol PDFs."""
     from recite.benchmark.downloaders import download_protocols
-    
-    conn = get_connection(db_path)
+
     if nct_ids is None:
         nct_ids = _load_nct_ids(None, max_trials)
-    download_protocols(nct_ids, max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_protocols(nct_ids, max_trials, conn)
 
 
 def extract_trial_data(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Extract trial data (evidence from protocols).
-    """
+    """Extract trial data (evidence from protocols)."""
     from recite.benchmark.processors import extract_evidence
-    
-    conn = get_connection(db_path)
-    extract_evidence(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        extract_evidence(max_trials, conn)
 
 
 def download_extract_all_relevant_trials(
@@ -105,32 +99,26 @@ def download_extract_all_relevant_trials(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Download and extract all relevant trial data.
-    """
+    """Download and extract all relevant trial data."""
     from recite.benchmark.downloaders import download_protocols
     from recite.benchmark.processors import extract_evidence
-    
-    conn = get_connection(db_path)
+
     if nct_ids is None:
         nct_ids = _load_nct_ids(None, max_trials)
-    download_protocols(nct_ids, max_trials, conn)
-    extract_evidence(max_trials, conn)
-    conn.close()
+    with _managed_connection(db_path) as conn:
+        download_protocols(nct_ids, max_trials, conn)
+        extract_evidence(max_trials, conn)
 
 
 def create_benchmark_db(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """
-    Create benchmark database (build RECITE instances).
-    """
+    """Create benchmark database (build RECITE instances)."""
     from recite.benchmark.builders import create_recite_instances
-    
-    conn = get_connection(db_path)
-    create_recite_instances(max_trials, conn)
-    conn.close()
+
+    with _managed_connection(db_path) as conn:
+        create_recite_instances(max_trials, conn)
 
 
 @app.command()
@@ -206,7 +194,6 @@ def init_benchmark(
     import time
     from datetime import datetime
 
-    # Configure logging to logs/ and stderr with requested level
     configure_logging(level=log_level, app_name="benchmark", also_stderr=True)
 
     start_time = time.time()
@@ -239,21 +226,18 @@ def init_benchmark(
             raise typer.Exit(code=1)
     logger.info("=" * 80)
     
-    # Convert string default to Path if needed
     if isinstance(db_path, str):
         db_path = Path(db_path)
     
-    # Determine if we should use manual NCT IDs
     manual_nct_ids = None
     if nct_ids:
         manual_nct_ids = nct_ids
     elif nct_ids_file and nct_ids_file.exists():
         manual_nct_ids = _load_nct_ids(nct_ids_file, max_trials)
     
-    # If manual NCT IDs provided, use them (backward compatibility)
     if manual_nct_ids:
         logger.info("=" * 80)
-        logger.info("MODE: Manual NCT IDs (backward compatibility)")
+        logger.info("MODE: Manual NCT IDs")
         logger.info("=" * 80)
         logger.info(f"Using manual NCT IDs")
         if nct_ids_file:
@@ -267,18 +251,14 @@ def init_benchmark(
         from recite.benchmark.discovery import check_trial_versions_batch
         from recite.benchmark.processors import extract_evidence, identify_amendments
         
-        # Initialize database (will backup if force=True)
         conn = init_database(db_path, force=force)
         
         if max_trials:
             manual_nct_ids = manual_nct_ids[:max_trials]
         
-        # For manual mode, we still need to check versions and filter
-        # Use the same pipeline stages but with manual NCT IDs
-        from recite.crawler.adapters import ClinicalTrialsGovAdapter
+        from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
         adapter = ClinicalTrialsGovAdapter()
         
-        # Stage 1: Check versions (with expedited filtering if enabled)
         logger.info("Checking version counts for manual NCT IDs...")
         check_trial_versions_batch(
             manual_nct_ids,
@@ -288,23 +268,18 @@ def init_benchmark(
             use_expedited=use_expedited,
         )
         
-        # Stage 2: Download versions
         logger.info("Downloading versions...")
         download_versions(manual_nct_ids, max_trials, conn, use_expedited=use_expedited)
         
-        # Stage 3: Identify amendments
         logger.info("Identifying EC changes...")
         identify_amendments(max_trials, conn)
         
-        # Stage 4: Download protocols
         logger.info("Downloading protocols...")
         download_protocols(manual_nct_ids, max_trials, conn)
         
-        # Stage 5: Extract evidence
         logger.info("Extracting evidence...")
         extract_evidence(max_trials, conn)
         
-        # Stage 6: Build RECITE instances
         logger.info("Building RECITE instances...")
         create_recite_instances(max_trials, conn)
         
@@ -627,7 +602,8 @@ def _find_matching_run_dir(
     """
     project_root = get_project_root()
     parquet_normalized = _normalize_parquet_paths_for_match(parquet_paths_base, project_root)
-    model_dir = out_dir / model_id
+    # out_dir is already model-specific (output_dir / model_id); use it directly
+    model_dir = out_dir
     if not model_dir.is_dir():
         return None
     suffix = "_no_rag" if no_rag else f"_topk{top_k}"
@@ -875,14 +851,19 @@ def run_benchmark(
         help="Enable LLM judge evaluator: 'llm_judge' (adds LLM judge to default metrics) or 'default' (only default metrics: BLEU/ROUGE/edit distance). Default evaluator always runs."
     ),
     judge_api_type: str = typer.Option(
-        "ucsf_versa",
+        "azure_openai",
         "--judge-api-type",
-        help="Judge API type: 'ucsf_versa' (default) or 'endpoint'"
+        help="Judge API type: 'azure_openai' (default) or 'endpoint'"
     ),
     judge_model_type: str = typer.Option(
         "4o",
         "--judge-model-type",
-        help="Judge model type for UCSF Versa API: '4o' (default, gpt-4o-2024-08-06), '4o-mini', '4.5-preview', or full model name"
+        help="Judge model type for Azure OpenAI API: '4o' (default, gpt-4o-2024-08-06), '4o-mini', '4.5-preview', or full model name"
+    ),
+    confirm_paid_judge: bool = typer.Option(
+        False,
+        "--confirm-paid-judge",
+        help="REQUIRED when using paid judge APIs (azure_openai). Acknowledges that judge calls cost real money. Without this flag, paid judge runs will abort with a cost warning."
     ),
     judge_endpoint: Optional[str] = typer.Option(
         None,
@@ -892,7 +873,7 @@ def run_benchmark(
     judge_model: Optional[str] = typer.Option(
         None,
         "--judge-model",
-        help="Model name for judge evaluator. If not provided, uses --judge-model-type for UCSF or required for endpoint"
+        help="Model name for judge evaluator. If not provided, uses --judge-model-type for Azure OpenAI or required for endpoint"
     ),
     num_samples: Optional[int] = typer.Option(
         None,
@@ -944,16 +925,23 @@ def run_benchmark(
     single-model run (config still supplies prompts, evaluator, two_step, top_k unless overridden).
 
     Example (single model):
-      uv run clintrialm.py benchmark run-benchmark --model-endpoint http://localhost:8001/v1 --model-name llama-3.1-8b
+      uv run recite benchmark run-benchmark --model-endpoint http://localhost:8001/v1 --model-name llama-3.1-8b
 
     Example (config-driven, multiple models):
-      uv run clintrialm.py benchmark run-benchmark --config config/benchmarks.yaml --include-test
+      uv run recite benchmark run-benchmark --config config/benchmarks.yaml --include-test
     """
     from recite.benchmark.evaluator import run_benchmark as _run_benchmark
-    from recite.crawler.llm import check_server_health
+
+    def check_server_health(endpoint: str, timeout: int = 5) -> bool:
+        """Quick reachability check: GET the endpoint root."""
+        import httpx
+        try:
+            r = httpx.get(f"{endpoint}/models", timeout=timeout)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     project_root = get_project_root()
-    # Resolve config path (default config/benchmarks.yaml)
     cfg_path = config_path if config_path is not None else project_root / "config" / "benchmarks.yaml"
     if not cfg_path.is_absolute():
         cfg_path = project_root / cfg_path
@@ -963,12 +951,10 @@ def run_benchmark(
             bench_config = yaml.safe_load(f)
         logger.info(f"Loaded benchmarks config from {cfg_path}")
 
-    # E2E smoke: num_samples=1, train only
     if e2e_smoke:
         num_samples = 1
         include_test = False
 
-    # Parquet paths: train + val; add test only if --include-test
     if not train_parquet.is_absolute():
         train_parquet = project_root / train_parquet
     if not val_parquet.is_absolute():
@@ -987,11 +973,9 @@ def run_benchmark(
     if include_test:
         parquet_paths_base["test"] = test_parquet
 
-    # E2E smoke: only train split
     if e2e_smoke:
         parquet_paths_base = {"train": train_parquet}
 
-    # Resolve output_dir, prompts_file, evaluator_type, two_step, top_k from config (CLI overrides)
     if isinstance(output_dir, str):
         output_dir = Path(output_dir)
     if not output_dir.is_absolute():
@@ -1010,7 +994,6 @@ def run_benchmark(
     cfg_top_k = bench_config.get("top_k") if bench_config else None
     top_k_list = _normalize_top_k_list(top_k, cfg_top_k)
 
-    # RAG config for in-process RAG (endpoint-based models)
     rag_config: Optional[Dict[str, Any]] = None
     if bench_config and "rag" in bench_config:
         import os
@@ -1019,21 +1002,19 @@ def run_benchmark(
             "embed_base_url": r.get("embed_base_url") or os.environ.get("RAG_EMBED_URL", ""),
             "embed_model": r.get("embed_model") or os.environ.get("RAG_EMBED_MODEL", ""),
             "persist_dir": r.get("persist_dir", "data/llamaindex_cache"),
-            "embed_api_key": r.get("embed_api_key") or os.environ.get("RAG_EMBED_API_KEY") or os.environ.get("UCSF_API_KEY"),
-            "embed_api_version": r.get("embed_api_version") or os.environ.get("UCSF_API_VER") or os.environ.get("API_VERSION"),
+            "embed_api_key": r.get("embed_api_key") or os.environ.get("RAG_EMBED_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY"),
+            "embed_api_version": r.get("embed_api_version") or os.environ.get("AZURE_OPENAI_API_VERSION") or os.environ.get("API_VERSION"),
         }
-        # Only set similarity_top_k from config if single int (list is expanded per run)
         r_top_k = r.get("top_k")
         if r_top_k is not None and not isinstance(r_top_k, list):
             rag_config["similarity_top_k"] = r_top_k
         if r.get("similarity_top_k") is not None:
             rag_config["similarity_top_k"] = r["similarity_top_k"]
-        # UCSF default: build embed URL from UCSF_RESOURCE_ENDPOINT if not set
-        ucsf_endpoint = (os.environ.get("UCSF_RESOURCE_ENDPOINT") or "").strip().rstrip("/")
-        if ucsf_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
-            rag_config["embed_base_url"] = f"{ucsf_endpoint}/openai/deployments/{rag_config['embed_model']}"
+        azure_endpoint = (os.environ.get("AZURE_OPENAI_ENDPOINT") or "").strip().rstrip("/")
+        if azure_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
+            rag_config["embed_base_url"] = f"{azure_endpoint}/openai/deployments/{rag_config['embed_model']}"
     sweep_no_rag = bool(bench_config.get("rag", {}).get("sweep_no_rag", False)) if bench_config else False
-    # no_rag_max_tokens is per-model only (context_window - reserved or model.no_rag_max_tokens); no global in config
+    sweep_rag = bool(bench_config.get("rag", {}).get("sweep_rag", True)) if bench_config else True
     no_rag_max_tokens: Optional[int] = None
     wait_for_revive_seconds = int(bench_config.get("wait_for_revive_seconds", 0)) if bench_config else 0
     _max_parallel_runs = max_parallel_runs if max_parallel_runs is not None else (int(bench_config.get("max_parallel_runs", 1)) if bench_config else 1)
@@ -1041,31 +1022,28 @@ def run_benchmark(
     _max_concurrent_requests = max_concurrent_requests if max_concurrent_requests is not None else (int(bench_config.get("max_concurrent_requests", 1)) if bench_config else 1)
     _max_concurrent_requests = max(1, _max_concurrent_requests)
 
-    # Single-model mode: user provided --model-endpoint and --model-name
     single_model = model_endpoint and model_name
     if single_model and rag_config is None:
         import os
-        ucsf = (os.environ.get("UCSF_RESOURCE_ENDPOINT") or "").strip().rstrip("/")
-        embed_model = os.environ.get("RAG_EMBED_MODEL") or ("text-embedding-3-small-1-brim" if ucsf else "text-embedding-3-small")
+        azure_ep = (os.environ.get("AZURE_OPENAI_ENDPOINT") or "").strip().rstrip("/")
+        embed_model = os.environ.get("RAG_EMBED_MODEL") or ("text-embedding-3-small-1-brim" if azure_ep else "text-embedding-3-small")
         rag_config = {
             "embed_base_url": os.environ.get("RAG_EMBED_URL", ""),
             "embed_model": embed_model,
             "persist_dir": "data/llamaindex_cache",
-            "embed_api_key": os.environ.get("RAG_EMBED_API_KEY") or (os.environ.get("UCSF_API_KEY") if ucsf else None),
-            "embed_api_version": os.environ.get("UCSF_API_VER") or os.environ.get("API_VERSION"),
+            "embed_api_key": os.environ.get("RAG_EMBED_API_KEY") or (os.environ.get("AZURE_OPENAI_API_KEY") if azure_ep else None),
+            "embed_api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or os.environ.get("API_VERSION"),
         }
-        if ucsf and not rag_config["embed_base_url"]:
-            rag_config["embed_base_url"] = f"{ucsf}/openai/deployments/{embed_model}"
-        # similarity_top_k set per run in _run_one_benchmark_run
+        if azure_ep and not rag_config["embed_base_url"]:
+            rag_config["embed_base_url"] = f"{azure_ep}/openai/deployments/{embed_model}"
     if single_model:
         if not check_server_health(model_endpoint, timeout=5):
             logger.error(
                 f"Server at {model_endpoint} is not reachable. "
-                "Start the server first (e.g. uv run clintrialm.py serve)."
+                "Start the server first."
             )
             raise typer.Exit(code=1)
 
-    # Multi-model mode: config must have models list (when not single-model)
     if not single_model and (not bench_config or "models" not in bench_config or not bench_config["models"]):
         logger.error(
             "Either provide --model-endpoint and --model-name, or use a config file with a 'models' list (e.g. config/benchmarks.yaml)."
@@ -1073,15 +1051,24 @@ def run_benchmark(
         raise typer.Exit(code=1)
 
     evaluator_config = None
-
-    # Validate evaluator configuration
-    evaluator_config = None
     if evaluator_type == "llm_judge":
-        from recite.llmapis import UCSFVersaAPI
-        
-        if judge_api_type == "ucsf_versa":
-            # UCSF Versa API judge
-            # Map short model type names to full model names
+        from recite.llmapis import AzureOpenAIAPI
+
+        if judge_api_type == "azure_openai" and not confirm_paid_judge:
+            logger.error(
+                "\n"
+                "╔══════════════════════════════════════════════════════════════╗\n"
+                "║  COST WARNING: LLM judge uses paid API (GPT-4o).            ║\n"
+                "║  Estimated cost: ~$30-60 per 3K samples.                    ║\n"
+                "║                                                             ║\n"
+                "║  To proceed, add: --confirm-paid-judge                      ║\n"
+                "║  For free local judge, use: --judge-api-type endpoint       ║\n"
+                "║  To skip judging entirely, use: --evaluator default         ║\n"
+                "╚══════════════════════════════════════════════════════════════╝"
+            )
+            raise typer.Exit(code=1)
+
+        if judge_api_type == "azure_openai":
             model_type_map = {
                 "4o": "gpt-4o-2024-08-06",
                 "4o-mini": "gpt-4o-mini-2024-07-18",
@@ -1089,43 +1076,37 @@ def run_benchmark(
                 "4-turbo": "gpt-4-turbo-128k",
             }
             
-            # Use judge_model_type if judge_model not provided
             if judge_model is None:
-                # Map short name to full model name, or use as-is if already a full name
                 judge_model = model_type_map.get(judge_model_type, judge_model_type)
                 logger.info(f"Using judge model type '{judge_model_type}' -> '{judge_model}'")
             else:
-                # User explicitly provided judge_model, use it directly
-                logger.info(f"Using explicitly provided judge model: {judge_model}")
+                logger.info(f"Using judge model: {judge_model}")
             
-            # Validate judge model is in available_models
-            if judge_model not in UCSFVersaAPI.available_models:
+            if judge_model not in AzureOpenAIAPI.available_models:
                 logger.error(
-                    f"Judge model '{judge_model}' is not in available models: {UCSFVersaAPI.available_models}"
+                    f"Judge model '{judge_model}' is not in available models: {AzureOpenAIAPI.available_models}"
                 )
                 raise typer.Exit(code=1)
             
-            # Optional: validate UCSF env vars for better UX
             import os
             missing_env = []
-            if not os.getenv("UCSF_API_KEY"):
-                missing_env.append("UCSF_API_KEY")
-            if not os.getenv("UCSF_API_VER"):
-                missing_env.append("UCSF_API_VER")
-            if not os.getenv("UCSF_RESOURCE_ENDPOINT"):
-                missing_env.append("UCSF_RESOURCE_ENDPOINT")
+            if not os.getenv("AZURE_OPENAI_API_KEY"):
+                missing_env.append("AZURE_OPENAI_API_KEY")
+            if not os.getenv("AZURE_OPENAI_API_VERSION"):
+                missing_env.append("AZURE_OPENAI_API_VERSION")
+            if not os.getenv("AZURE_OPENAI_ENDPOINT"):
+                missing_env.append("AZURE_OPENAI_ENDPOINT")
             if missing_env:
                 logger.warning(
-                    f"UCSF API environment variables not set: {', '.join(missing_env)}. "
-                    f"UCSFVersaAPI will fail during initialization if these are missing."
+                    f"API environment variables not set: {', '.join(missing_env)}. "
+                    f"AzureOpenAIAPI requires these for initialization."
                 )
             
             evaluator_config = {
-                "api_type": "ucsf_versa",
+                "api_type": "azure_openai",
                 "model": judge_model,
             }
         elif judge_api_type == "endpoint":
-            # Endpoint-based judge
             if not judge_endpoint or not judge_model:
                 logger.error("--judge-endpoint and --judge-model are required when --judge-api-type is 'endpoint'")
                 raise typer.Exit(code=1)
@@ -1135,10 +1116,9 @@ def run_benchmark(
                 "model": judge_model,
             }
         else:
-            logger.error(f"Unknown --judge-api-type: {judge_api_type}. Use 'ucsf_versa' or 'endpoint'")
+            logger.error(f"Unknown --judge-api-type: {judge_api_type}. Use 'azure_openai' or 'endpoint'")
             raise typer.Exit(code=1)
     
-    # Convert string defaults to Path if needed
     if isinstance(output_dir, str):
         output_dir = Path(output_dir)
 
@@ -1218,30 +1198,73 @@ def run_benchmark(
         _emit_run_summary(output_dir)
         return
 
-    # Multi-model mode: build run specs then run with ThreadPoolExecutor
     models_list = bench_config["models"]
     multi_specs: List[Dict[str, Any]] = []
     for m in models_list:
         api_type = m.get("api_type", "endpoint")
         mod = m.get("model")
-        if api_type == "ucsf_versa":
+        if api_type == "azure_openai":
             if not mod:
-                logger.warning(f"Skipping model entry missing model (ucsf_versa): {m}")
+                logger.warning(f"Skipping model entry missing model (azure_openai): {m}")
                 continue
-            from recite.llmapis import UCSFVersaAPI
-            if mod not in UCSFVersaAPI.available_models:
+            from recite.llmapis import AzureOpenAIAPI
+            if mod not in AzureOpenAIAPI.available_models:
                 logger.warning(
-                    f"Model '{mod}' not in UCSFVersaAPI.available_models; skipping. "
-                    f"Available: {UCSFVersaAPI.available_models}"
+                    f"Model '{mod}' not in AzureOpenAIAPI.available_models; skipping. "
+                    f"Available: {AzureOpenAIAPI.available_models}"
                 )
                 continue
             model_id = _sanitize_model_id(m.get("id", mod))
             out_dir = output_dir / model_id
-            model = {"api_type": "ucsf_versa", "model": mod}
+            model = {"api_type": "azure_openai", "model": mod}
             if m.get("context_window") is not None:
                 model["context_window"] = int(m["context_window"])
             if m.get("no_rag_max_tokens") is not None:
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
+            two_step_m = m.get("two_step")
+            if two_step_m is None and bench_config:
+                two_step_m = bench_config.get("two_step", False)
+        elif api_type == "python_gpu":
+            if not mod:
+                logger.warning(f"Skipping model entry missing model (python_gpu): {m}")
+                continue
+            model_id = _sanitize_model_id(m.get("id", mod))
+            out_dir = output_dir / model_id
+            model = {"api_type": "python_gpu", "model": mod}
+            if m.get("context_window") is not None:
+                model["context_window"] = int(m["context_window"])
+            if m.get("no_rag_max_tokens") is not None:
+                model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
+            model["device"] = m.get("device", "cuda")
+            model["gpus"] = int(m.get("gpus", 1))
+            two_step_m = m.get("two_step")
+            if two_step_m is None and bench_config:
+                two_step_m = bench_config.get("two_step", False)
+        elif api_type == "vllm_endpoint":
+            ep = m.get("endpoint")
+            if not ep or not mod:
+                logger.warning(f"Skipping model entry missing endpoint or model (vllm_endpoint): {m}")
+                continue
+            if not check_server_health(ep, timeout=5):
+                logger.warning(f"Server at {ep} not reachable; skipping model {m.get('id', mod)}")
+                continue
+            model_id = _sanitize_model_id(m.get("id", mod))
+            out_dir = output_dir / model_id
+            model = {"api_type": "vllm_endpoint", "model": mod, "endpoint": ep}
+            if m.get("context_window") is not None:
+                model["context_window"] = int(m["context_window"])
+            if m.get("no_rag_max_tokens") is not None:
+                model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
+            if m.get("max_tokens") is not None:
+                model["max_tokens"] = int(m["max_tokens"])
+            if m.get("timeout") is not None:
+                model["timeout"] = float(m["timeout"])
+            if m.get("max_concurrent") is not None:
+                model["max_concurrent"] = int(m["max_concurrent"])
+            if m.get("save_every") is not None:
+                model["save_every"] = int(m["save_every"])
+            if m.get("prompt_suffix") is not None:
+                model["prompt_suffix"] = str(m["prompt_suffix"])
             two_step_m = m.get("two_step")
             if two_step_m is None and bench_config:
                 two_step_m = bench_config.get("two_step", False)
@@ -1302,27 +1325,28 @@ def run_benchmark(
                     "sweep_no_rag": True,
                     "max_concurrent_requests": _max_concurrent_requests,
                 })
-            multi_specs.append({
-                "model": model,
-                "k": k,
-                "out_dir": out_dir,
-                "run_config_base": run_config_base,
-                "parquet_paths_base": parquet_paths_base,
-                "evaluator_type": evaluator_type,
-                "evaluator_config": evaluator_config,
-                "batch_size": batch_size,
-                "num_samples": num_samples,
-                "prompts_file": prompts_file,
-                "two_step_val": two_step_val,
-                "rag_config": rag_config,
-                "wait_for_revive_seconds": wait_for_revive_seconds,
-                "e2e_smoke": e2e_smoke,
-                "cfg_path": cfg_path,
-                "no_rag": False,
-                "no_rag_max_tokens": no_rag_max_m,
-                "sweep_no_rag": sweep_no_rag,
-                "max_concurrent_requests": _max_concurrent_requests,
-            })
+            if sweep_rag:
+                multi_specs.append({
+                    "model": model,
+                    "k": k,
+                    "out_dir": out_dir,
+                    "run_config_base": run_config_base,
+                    "parquet_paths_base": parquet_paths_base,
+                    "evaluator_type": evaluator_type,
+                    "evaluator_config": evaluator_config,
+                    "batch_size": batch_size,
+                    "num_samples": num_samples,
+                    "prompts_file": prompts_file,
+                    "two_step_val": two_step_val,
+                    "rag_config": rag_config,
+                    "wait_for_revive_seconds": wait_for_revive_seconds,
+                    "e2e_smoke": e2e_smoke,
+                    "cfg_path": cfg_path,
+                    "no_rag": False,
+                    "no_rag_max_tokens": no_rag_max_m,
+                    "sweep_no_rag": sweep_no_rag,
+                    "max_concurrent_requests": _max_concurrent_requests,
+                })
 
     logger.info("=" * 80)
     logger.info(f"Running {len(multi_specs)} benchmark run(s) (max_parallel_runs={_max_parallel_runs})")
@@ -1377,18 +1401,12 @@ def summarize(
 
 
 def _load_nct_ids(nct_ids_file: Optional[Path], max_trials: Optional[int]) -> List[str]:
-    """
-    Load NCT IDs from file or use defaults.
-    
-    For large-scale processing, provide a file with NCT IDs (one per line).
-    Without a file, only 5 sample trials are processed (for testing only).
-    """
+    """Load NCT IDs from file or use defaults."""
     if nct_ids_file and nct_ids_file.exists():
         with open(nct_ids_file) as f:
             nct_ids = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
         logger.info(f"Loaded {len(nct_ids)} NCT IDs from {nct_ids_file}")
     else:
-        # Default sample NCT IDs for testing only
         nct_ids = [
             "NCT02110043",
             "NCT03281616",

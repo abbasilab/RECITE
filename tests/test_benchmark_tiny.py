@@ -1,9 +1,4 @@
-"""
-Smoke tests for RECITE benchmark construction pipeline.
-
-Tests the core algorithms: EC diff detection, text cleaning, triplet creation.
-No LLM calls — exercises pure algorithmic logic on synthetic fixtures.
-"""
+"""Smoke tests for RECITE benchmark construction pipeline."""
 
 import sqlite3
 

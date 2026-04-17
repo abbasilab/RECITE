@@ -1,9 +1,4 @@
-"""
-Trial discovery module for RECITE benchmark.
-
-Discovers all NCT IDs from ClinicalTrials.gov using bulk XML download
-or API pagination methods.
-"""
+"""Trial discovery from ClinicalTrials.gov."""
 
 import json
 import tempfile
@@ -15,7 +10,7 @@ from xml.etree import ElementTree as ET
 from loguru import logger
 
 from recite.benchmark.api_client import fetch_version_history
-from recite.crawler.adapters import ClinicalTrialsGovAdapter
+from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
 
 def discover_all_nct_ids(

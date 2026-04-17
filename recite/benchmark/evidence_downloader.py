@@ -1,8 +1,4 @@
-"""
-Evidence source downloader for RECITE benchmark.
-
-Downloads evidence documents (PDFs, API fields, etc.) based on exploration results.
-"""
+"""Evidence source downloader."""
 
 import json
 from pathlib import Path
@@ -10,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from recite.crawler.adapters import ClinicalTrialsGovAdapter
+from recite.benchmark.ctg_adapter import ClinicalTrialsGovAdapter
 
 
 def download_evidence_for_trial(
