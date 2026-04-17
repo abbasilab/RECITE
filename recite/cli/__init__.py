@@ -31,9 +31,7 @@ def _ensure_logging(
 
 
 def _register_subapps():
-    from recite.cli import crawl as crawl_mod
     from recite.cli import benchmark as benchmark_mod
-    app.add_typer(crawl_mod.app, name="crawl")
     app.add_typer(benchmark_mod.app, name="benchmark")
 
 
