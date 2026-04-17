@@ -1,5 +1,1 @@
-"""
-__init__.py
-
-Literature crawler package for indexing biomedical papers.
-"""
+"""Data source adapters for ClinicalTrials.gov and literature APIs."""

@@ -34,7 +34,7 @@ from recite.benchmark.results_db import (
     insert_result,
 )
 from recite.benchmark.utils import clean_text
-from recite.accrual.parsing import parse_directives_response, parse_impact_response
+from recite.ec_impact.parsing import parse_directives_response, parse_impact_response
 
 
 # ---------------------------------------------------------------------------

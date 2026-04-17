@@ -1,7 +1,4 @@
-"""
-Parse LLM responses for directives and impact into paper_answers columns.
-Handles JSON or fallback heuristics; partial answers and failures gracefully.
-"""
+"""Parse LLM responses for directives and impact."""
 
 import json
 import re
@@ -9,7 +6,6 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-# Valid answer_location values
 ANSWER_LOCATIONS = ("exact", "in_paper", "none")
 
 
@@ -27,17 +23,13 @@ def _normalize_location(s: Optional[str]) -> str:
 
 
 def _robust_json_parse(text: str) -> Optional[Dict[str, Any]]:
-    """Try to parse JSON from LLM response (strip markdown, trailing commas)."""
     if not text or not text.strip():
         return None
     t = text.strip()
-    # Strip markdown code block
     t = re.sub(r"^```(?:json)?\s*", "", t)
     t = re.sub(r"\s*```$", "", t)
     t = t.strip()
-    # Remove trailing commas before ] or }
     t = re.sub(r",(\s*[}\]])", r"\1", t)
-    # Remove commas inside numbers (e.g. 4,851 -> 4851) so JSON is valid
     while "," in t and re.search(r"\d,\d", t):
         t = re.sub(r"(\d),(\d)", r"\1\2", t)
     try:
@@ -47,10 +39,6 @@ def _robust_json_parse(text: str) -> Optional[Dict[str, Any]]:
 
 
 def parse_directives_response(raw_response: Optional[str]) -> Dict[str, Any]:
-    """
-    Parse LLM response for Question 1 (directives).
-    Returns dict with: directives_answer_location, directives_has_answer, directives_exact_text, directives_count.
-    """
     out = {
         "directives_answer_location": "none",
         "directives_has_answer": 0,
@@ -79,7 +67,7 @@ def parse_directives_response(raw_response: Optional[str]) -> Dict[str, Any]:
                 pass
         return out
 
-    # Heuristic: look for "exact", "in paper", "none" and directive list
+    # Heuristic fallback
     t = raw_response.strip().lower()
     if "in the paper" in t or "within the paper" in t or "exists within" in t:
         out["directives_answer_location"] = "in_paper"
@@ -87,17 +75,12 @@ def parse_directives_response(raw_response: Optional[str]) -> Dict[str, Any]:
     elif "exact" in t or "yes," in t or "following" in t or ":" in raw_response:
         out["directives_answer_location"] = "exact"
         out["directives_has_answer"] = 1
-        # Use full response as fallback for exact text (user may have listed directives)
         if len(raw_response.strip()) > 50:
             out["directives_exact_text"] = raw_response.strip()[:10000]
     return out
 
 
 def parse_impact_response(raw_response: Optional[str]) -> Dict[str, Any]:
-    """
-    Parse LLM response for Question 2 (impact).
-    Returns dict with: impact_answer_location, impact_has_answer, impact_percent, impact_absolute, impact_unit, impact_qualitative.
-    """
     out = {
         "impact_answer_location": "none",
         "impact_has_answer": 0,
@@ -157,7 +140,7 @@ def parse_impact_response(raw_response: Optional[str]) -> Dict[str, Any]:
                 out["impact_evidence"] = raw_evidence.strip() or None
         return out
 
-    # Heuristic: look for a percentage number (e.g. 15%, 15 percent)
+    # Heuristic fallback
     t = raw_response.strip()
     pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%|(\d+(?:\.\d+)?)\s*percent", t, re.I)
     if pct_match:
@@ -169,7 +152,6 @@ def parse_impact_response(raw_response: Optional[str]) -> Dict[str, Any]:
             out["impact_unit"] = "percent"
         except (TypeError, ValueError):
             pass
-    # Absolute number (e.g. "50 more patients", "increase of 50")
     abs_match = re.search(r"(\d+)\s*(?:more|additional)\s*(?:patients|participants)?", t, re.I)
     if abs_match and out["impact_percent"] is None:
         try:

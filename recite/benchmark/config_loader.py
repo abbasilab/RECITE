@@ -1,8 +1,4 @@
-"""
-Load benchmark YAML config and expand to experiment specs with content-addressed config_id.
-
-Used by both the CLI and the recite orchestrator.
-"""
+"""Load benchmark YAML config and expand to experiment specs."""
 
 import json
 import os
@@ -21,7 +17,6 @@ _RESERVED_PROMPT_TOKENS = 4096
 
 
 def load_benchmark_config(config_path: Path) -> Dict[str, Any]:
-    """Load benchmark YAML config. Path may be relative to project root."""
     path = Path(config_path)
     if not path.is_absolute():
         path = get_project_root() / path
@@ -32,7 +27,6 @@ def load_benchmark_config(config_path: Path) -> Dict[str, Any]:
 
 
 def load_prompts_snapshot(prompts_file: Path, project_root: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """Load prompts JSON for fingerprint/snapshot. Returns None if file missing."""
     root = project_root or get_project_root()
     path = Path(prompts_file) if not isinstance(prompts_file, Path) else prompts_file
     if not path.is_absolute():
@@ -47,7 +41,6 @@ def load_prompts_snapshot(prompts_file: Path, project_root: Optional[Path] = Non
 
 
 def _sanitize_model_id(model_id: str) -> str:
-    """Sanitize model id for use as directory name."""
     return re.sub(r"[^\w\-]", "_", model_id).strip("_") or "model"
 
 
@@ -61,7 +54,6 @@ def _resolve_path(path_val: Any, project_root: Path) -> Path:
 
 
 def _normalize_top_k_list(config_top_k: Optional[Any]) -> List[int]:
-    """Normalize config top_k to list of ints."""
     if config_top_k is None:
         return [2]
     if isinstance(config_top_k, list):
@@ -70,7 +62,6 @@ def _normalize_top_k_list(config_top_k: Optional[Any]) -> List[int]:
 
 
 def _effective_no_rag_max_tokens(model_config: Dict[str, Any], reserved: int = _RESERVED_PROMPT_TOKENS) -> Optional[int]:
-    """Per-model no_rag_max_tokens from context_window or explicit."""
     if not model_config:
         return None
     explicit = model_config.get("no_rag_max_tokens")
@@ -88,29 +79,12 @@ def get_experiment_specs(
     project_root: Optional[Path] = None,
     include_test: bool = False,
 ) -> List[Dict[str, Any]]:
-    """
-    Load config and expand to list of experiment specs (model × top_k × no_rag/topk).
-    Each spec has config_id (content-addressed fingerprint) and all fields needed for
-    ensure_config and run_single_sample.
-
-    Args:
-        config_path: Path to benchmarks YAML.
-        parquet_paths: If provided, use these; else resolve from config parquet_paths.
-        project_root: For resolving relative paths. Default: get_project_root().
-        include_test: If True, include test split in parquet_paths.
-
-    Returns:
-        List of spec dicts with config_id, model_id, model, top_k, no_rag, parquet_paths,
-        rag_config, evaluator_type, evaluator_config, prompts_file, prompts_snapshot,
-        two_step, batch_size, num_samples, wait_for_revive_seconds, config_path, run_started_at.
-    """
     root = project_root or get_project_root()
     config_path = Path(config_path)
     if not config_path.is_absolute():
         config_path = root / config_path
     bench_config = load_benchmark_config(config_path)
 
-    # Parquet paths (optionally filtered by splits_to_run)
     if parquet_paths is not None:
         paths = {k: Path(v) for k, v in parquet_paths.items()}
     else:
@@ -134,12 +108,10 @@ def get_experiment_specs(
             paths["test"] = all_paths["test"]
     parquet_paths_str = {k: str(v.resolve()) for k, v in paths.items()}
 
-    # Prompts
     prompts_file = bench_config.get("prompts_file", "config/benchmark_prompts.json")
     prompts_file_path = _resolve_path(prompts_file, root)
     prompts_snapshot = load_prompts_snapshot(prompts_file_path, root)
 
-    # RAG config
     rag_config: Optional[Dict[str, Any]] = None
     if bench_config.get("rag"):
         r = bench_config["rag"]
@@ -213,7 +185,6 @@ def get_experiment_specs(
             if m.get("no_rag_max_tokens") is not None:
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
             model["device"] = m.get("device", "cuda")
-            # Per-model GPU count (for multi-GPU models); default 1
             model["gpus"] = int(m.get("gpus", 1))
             two_step_val = m.get("two_step", two_step)
         else:

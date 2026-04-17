@@ -13,7 +13,7 @@ from pathlib import Path
 from recite.benchmark.ec_detector import detect_ec_changes
 from recite.benchmark.builders import create_recite_instances
 from recite.benchmark.utils import clean_text
-from recite.accrual.parsing import parse_directives_response, parse_impact_response
+from recite.ec_impact.parsing import parse_directives_response, parse_impact_response
 
 
 class TestAccrualEndToEnd:

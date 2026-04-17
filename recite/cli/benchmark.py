@@ -1,6 +1,4 @@
-"""
-benchmark.py
-"""
+"""Benchmark CLI commands."""
 
 import json
 import re
@@ -24,7 +22,7 @@ app = typer.Typer()
 
 @contextmanager
 def _managed_connection(db_path: Optional[Path] = None) -> Generator:
-    """Context manager for database connection lifecycle."""
+    """Context manager for database connection."""
     conn = get_connection(db_path)
     try:
         yield conn
@@ -37,7 +35,7 @@ def download_all_trial_versions(
     max_trials: Optional[int] = None,
     db_path: Optional[Path] = None,
 ):
-    """Download all trial versions."""
+    """Download all trial versions from ClinicalTrials.gov."""
     from recite.benchmark.downloaders import download_versions
 
     if instance_ids is None:
@@ -196,7 +194,6 @@ def init_benchmark(
     import time
     from datetime import datetime
 
-    # Configure logging to logs/ and stderr with requested level
     configure_logging(level=log_level, app_name="benchmark", also_stderr=True)
 
     start_time = time.time()
@@ -229,21 +226,18 @@ def init_benchmark(
             raise typer.Exit(code=1)
     logger.info("=" * 80)
     
-    # Convert string default to Path if needed
     if isinstance(db_path, str):
         db_path = Path(db_path)
     
-    # Determine if we should use manual NCT IDs
     manual_instance_ids = None
     if instance_ids:
         manual_instance_ids = instance_ids
     elif instance_ids_file and instance_ids_file.exists():
         manual_instance_ids = _load_instance_ids(instance_ids_file, max_trials)
     
-    # If manual NCT IDs provided, use them (backward compatibility)
     if manual_instance_ids:
         logger.info("=" * 80)
-        logger.info("MODE: Manual NCT IDs (backward compatibility)")
+        logger.info("MODE: Manual NCT IDs")
         logger.info("=" * 80)
         logger.info(f"Using manual NCT IDs")
         if instance_ids_file:
@@ -257,18 +251,14 @@ def init_benchmark(
         from recite.benchmark.discovery import check_trial_versions_batch
         from recite.benchmark.processors import extract_evidence, identify_amendments
         
-        # Initialize database (will backup if force=True)
         conn = init_database(db_path, force=force)
         
         if max_trials:
             manual_instance_ids = manual_instance_ids[:max_trials]
         
-        # For manual mode, we still need to check versions and filter
-        # Use the same pipeline stages but with manual NCT IDs
         from recite.crawler.adapters import ClinicalTrialsGovAdapter
         adapter = ClinicalTrialsGovAdapter()
         
-        # Stage 1: Check versions (with expedited filtering if enabled)
         logger.info("Checking version counts for manual NCT IDs...")
         check_trial_versions_batch(
             manual_instance_ids,
@@ -278,23 +268,18 @@ def init_benchmark(
             use_expedited=use_expedited,
         )
         
-        # Stage 2: Download versions
         logger.info("Downloading versions...")
         download_versions(manual_instance_ids, max_trials, conn, use_expedited=use_expedited)
         
-        # Stage 3: Identify amendments
         logger.info("Identifying EC changes...")
         identify_amendments(max_trials, conn)
         
-        # Stage 4: Download protocols
         logger.info("Downloading protocols...")
         download_protocols(manual_instance_ids, max_trials, conn)
         
-        # Stage 5: Extract evidence
         logger.info("Extracting evidence...")
         extract_evidence(max_trials, conn)
         
-        # Stage 6: Build RECITE instances
         logger.info("Building RECITE instances...")
         create_recite_instances(max_trials, conn)
         
@@ -940,16 +925,15 @@ def run_benchmark(
     single-model run (config still supplies prompts, evaluator, two_step, top_k unless overridden).
 
     Example (single model):
-      uv run clintrialm.py benchmark run-benchmark --model-endpoint http://localhost:8001/v1 --model-name llama-3.1-8b
+      uv run recite benchmark run-benchmark --model-endpoint http://localhost:8001/v1 --model-name llama-3.1-8b
 
     Example (config-driven, multiple models):
-      uv run clintrialm.py benchmark run-benchmark --config config/benchmarks.yaml --include-test
+      uv run recite benchmark run-benchmark --config config/benchmarks.yaml --include-test
     """
     from recite.benchmark.evaluator import run_benchmark as _run_benchmark
     from recite.crawler.llm import check_server_health
 
     project_root = get_project_root()
-    # Resolve config path (default config/benchmarks.yaml)
     cfg_path = config_path if config_path is not None else project_root / "config" / "benchmarks.yaml"
     if not cfg_path.is_absolute():
         cfg_path = project_root / cfg_path
@@ -959,12 +943,10 @@ def run_benchmark(
             bench_config = yaml.safe_load(f)
         logger.info(f"Loaded benchmarks config from {cfg_path}")
 
-    # E2E smoke: num_samples=1, train only
     if e2e_smoke:
         num_samples = 1
         include_test = False
 
-    # Parquet paths: train + val; add test only if --include-test
     if not train_parquet.is_absolute():
         train_parquet = project_root / train_parquet
     if not val_parquet.is_absolute():
@@ -983,11 +965,9 @@ def run_benchmark(
     if include_test:
         parquet_paths_base["test"] = test_parquet
 
-    # E2E smoke: only train split
     if e2e_smoke:
         parquet_paths_base = {"train": train_parquet}
 
-    # Resolve output_dir, prompts_file, evaluator_type, two_step, top_k from config (CLI overrides)
     if isinstance(output_dir, str):
         output_dir = Path(output_dir)
     if not output_dir.is_absolute():
@@ -1006,7 +986,6 @@ def run_benchmark(
     cfg_top_k = bench_config.get("top_k") if bench_config else None
     top_k_list = _normalize_top_k_list(top_k, cfg_top_k)
 
-    # RAG config for in-process RAG (endpoint-based models)
     rag_config: Optional[Dict[str, Any]] = None
     if bench_config and "rag" in bench_config:
         import os
@@ -1018,19 +997,16 @@ def run_benchmark(
             "embed_api_key": r.get("embed_api_key") or os.environ.get("RAG_EMBED_API_KEY") or os.environ.get("UCSF_API_KEY"),
             "embed_api_version": r.get("embed_api_version") or os.environ.get("UCSF_API_VER") or os.environ.get("API_VERSION"),
         }
-        # Only set similarity_top_k from config if single int (list is expanded per run)
         r_top_k = r.get("top_k")
         if r_top_k is not None and not isinstance(r_top_k, list):
             rag_config["similarity_top_k"] = r_top_k
         if r.get("similarity_top_k") is not None:
             rag_config["similarity_top_k"] = r["similarity_top_k"]
-        # UCSF default: build embed URL from UCSF_RESOURCE_ENDPOINT if not set
         ucsf_endpoint = (os.environ.get("UCSF_RESOURCE_ENDPOINT") or "").strip().rstrip("/")
         if ucsf_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
             rag_config["embed_base_url"] = f"{ucsf_endpoint}/openai/deployments/{rag_config['embed_model']}"
     sweep_no_rag = bool(bench_config.get("rag", {}).get("sweep_no_rag", False)) if bench_config else False
     sweep_rag = bool(bench_config.get("rag", {}).get("sweep_rag", True)) if bench_config else True
-    # no_rag_max_tokens is per-model only (context_window - reserved or model.no_rag_max_tokens); no global in config
     no_rag_max_tokens: Optional[int] = None
     wait_for_revive_seconds = int(bench_config.get("wait_for_revive_seconds", 0)) if bench_config else 0
     _max_parallel_runs = max_parallel_runs if max_parallel_runs is not None else (int(bench_config.get("max_parallel_runs", 1)) if bench_config else 1)
@@ -1038,7 +1014,6 @@ def run_benchmark(
     _max_concurrent_requests = max_concurrent_requests if max_concurrent_requests is not None else (int(bench_config.get("max_concurrent_requests", 1)) if bench_config else 1)
     _max_concurrent_requests = max(1, _max_concurrent_requests)
 
-    # Single-model mode: user provided --model-endpoint and --model-name
     single_model = model_endpoint and model_name
     if single_model and rag_config is None:
         import os
@@ -1053,16 +1028,14 @@ def run_benchmark(
         }
         if ucsf and not rag_config["embed_base_url"]:
             rag_config["embed_base_url"] = f"{ucsf}/openai/deployments/{embed_model}"
-        # similarity_top_k set per run in _run_one_benchmark_run
     if single_model:
         if not check_server_health(model_endpoint, timeout=5):
             logger.error(
                 f"Server at {model_endpoint} is not reachable. "
-                "Start the server first (e.g. uv run clintrialm.py serve)."
+                "Start the server first."
             )
             raise typer.Exit(code=1)
 
-    # Multi-model mode: config must have models list (when not single-model)
     if not single_model and (not bench_config or "models" not in bench_config or not bench_config["models"]):
         logger.error(
             "Either provide --model-endpoint and --model-name, or use a config file with a 'models' list (e.g. config/benchmarks.yaml)."
@@ -1070,18 +1043,14 @@ def run_benchmark(
         raise typer.Exit(code=1)
 
     evaluator_config = None
-
-    # Validate evaluator configuration
-    evaluator_config = None
     if evaluator_type == "llm_judge":
         from recite.llmapis import UCSFVersaAPI
 
-        # Cost guard: paid judge APIs require explicit acknowledgment
         if judge_api_type == "ucsf_versa" and not confirm_paid_judge:
             logger.error(
                 "\n"
                 "╔══════════════════════════════════════════════════════════════╗\n"
-                "║  COST WARNING: LLM judge uses UCSF Versa (paid GPT-4o).    ║\n"
+                "║  COST WARNING: LLM judge uses paid API (GPT-4o).            ║\n"
                 "║  Estimated cost: ~$30-60 per 3K samples.                    ║\n"
                 "║                                                             ║\n"
                 "║  To proceed, add: --confirm-paid-judge                      ║\n"
@@ -1092,8 +1061,6 @@ def run_benchmark(
             raise typer.Exit(code=1)
 
         if judge_api_type == "ucsf_versa":
-            # UCSF Versa API judge
-            # Map short model type names to full model names
             model_type_map = {
                 "4o": "gpt-4o-2024-08-06",
                 "4o-mini": "gpt-4o-mini-2024-07-18",
@@ -1101,23 +1068,18 @@ def run_benchmark(
                 "4-turbo": "gpt-4-turbo-128k",
             }
             
-            # Use judge_model_type if judge_model not provided
             if judge_model is None:
-                # Map short name to full model name, or use as-is if already a full name
                 judge_model = model_type_map.get(judge_model_type, judge_model_type)
                 logger.info(f"Using judge model type '{judge_model_type}' -> '{judge_model}'")
             else:
-                # User explicitly provided judge_model, use it directly
-                logger.info(f"Using explicitly provided judge model: {judge_model}")
+                logger.info(f"Using judge model: {judge_model}")
             
-            # Validate judge model is in available_models
             if judge_model not in UCSFVersaAPI.available_models:
                 logger.error(
                     f"Judge model '{judge_model}' is not in available models: {UCSFVersaAPI.available_models}"
                 )
                 raise typer.Exit(code=1)
             
-            # Optional: validate UCSF env vars for better UX
             import os
             missing_env = []
             if not os.getenv("UCSF_API_KEY"):
@@ -1128,8 +1090,8 @@ def run_benchmark(
                 missing_env.append("UCSF_RESOURCE_ENDPOINT")
             if missing_env:
                 logger.warning(
-                    f"UCSF API environment variables not set: {', '.join(missing_env)}. "
-                    f"UCSFVersaAPI will fail during initialization if these are missing."
+                    f"API environment variables not set: {', '.join(missing_env)}. "
+                    f"UCSFVersaAPI requires these for initialization."
                 )
             
             evaluator_config = {
@@ -1137,7 +1099,6 @@ def run_benchmark(
                 "model": judge_model,
             }
         elif judge_api_type == "endpoint":
-            # Endpoint-based judge
             if not judge_endpoint or not judge_model:
                 logger.error("--judge-endpoint and --judge-model are required when --judge-api-type is 'endpoint'")
                 raise typer.Exit(code=1)
@@ -1150,7 +1111,6 @@ def run_benchmark(
             logger.error(f"Unknown --judge-api-type: {judge_api_type}. Use 'ucsf_versa' or 'endpoint'")
             raise typer.Exit(code=1)
     
-    # Convert string defaults to Path if needed
     if isinstance(output_dir, str):
         output_dir = Path(output_dir)
 
@@ -1230,7 +1190,6 @@ def run_benchmark(
         _emit_run_summary(output_dir)
         return
 
-    # Multi-model mode: build run specs then run with ThreadPoolExecutor
     models_list = bench_config["models"]
     multi_specs: List[Dict[str, Any]] = []
     for m in models_list:
@@ -1434,18 +1393,12 @@ def summarize(
 
 
 def _load_instance_ids(instance_ids_file: Optional[Path], max_trials: Optional[int]) -> List[str]:
-    """
-    Load NCT IDs from file or use defaults.
-    
-    For large-scale processing, provide a file with NCT IDs (one per line).
-    Without a file, only 5 sample trials are processed (for testing only).
-    """
+    """Load NCT IDs from file or use defaults."""
     if instance_ids_file and instance_ids_file.exists():
         with open(instance_ids_file) as f:
             instance_ids = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
         logger.info(f"Loaded {len(instance_ids)} NCT IDs from {instance_ids_file}")
     else:
-        # Default sample NCT IDs for testing only
         instance_ids = [
             "NCT02110043",
             "NCT03281616",

@@ -1,12 +1,4 @@
-"""
-llmapis.py
-
-This script defines a lightweight wrapper around the OpenAI Chat Completions API
-using the official `openai` Python client. It supports interaction with GPT-4.1 family
-models, with configurable model selection and API key loading via environment variables.
-
-Abbasi Lab, UCSF
-"""
+"""LLM API wrappers for OpenAI and Azure OpenAI endpoints."""
 
 
 import os
@@ -24,9 +16,6 @@ load_dotenv()
 
 
 class AbstractLLMAPI:
-    """Abstract class for instantiating objects that serve as
-    callable LLM APIs.
-    """
     def __init__(
             self,
             model: str,
@@ -34,8 +23,6 @@ class AbstractLLMAPI:
             *args,
             **kwargs
             ) -> None:
-        """
-        """
         self.model = model
         logger.info(f"Initialized LLMAPI with model: {model}")
         
@@ -60,8 +47,6 @@ class AbstractLLMAPI:
     def robust_json_parse(
             llm_response: str
             ) -> dict | list:
-        """Cleans and parses LLM JSON output, handling common formatting issues.
-        """
         # Remove markdown/code block formatting
         llm_response = llm_response.strip()
         llm_response = re.sub(r"^```json\s*", "", llm_response)
@@ -85,16 +70,6 @@ class AbstractLLMAPI:
             *format_args,
             **format_kwargs
             ) -> str:
-        """Given a prompt template and format arguments, call the LLM and return the response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            str: Raw LLM response
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
         logger.debug("Calling LLM for tabulate_eligibility.")
         llm_response = self(prompt, self.system_prompt)
@@ -106,16 +81,6 @@ class AbstractLLMAPI:
             *format_args,
             **format_kwargs
             ) -> dict:
-        """Given a prompt template and format arguments, call the LLM and parse JSON response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            dict: Parsed JSON response with 'headers' and 'entries' keys
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
         logger.debug("Calling LLM for tabulate_eligibility_json.")
         llm_response = self(prompt, self.system_prompt)
@@ -123,33 +88,21 @@ class AbstractLLMAPI:
         try:
             result = self.robust_json_parse(llm_response)
             if isinstance(result, dict) and 'headers' in result and 'entries' in result:
-                logger.info("LLM returned valid tabulated eligibility JSON.")
                 return result
             else:
-                logger.error("LLM response missing 'headers' or 'entries'. Returning empty result.")
+                logger.error("LLM response missing 'headers' or 'entries'.")
                 return {'headers': [], 'entries': []}
         except Exception as e:
-            logger.error(f"Failed to robustly parse LLM response as JSON: {e}")
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
             return {'headers': [], 'entries': []}
 
 
 class OpenAIAPI(AbstractLLMAPI):
-    """A simple wrapper around the OpenAI Chat Completions API.
-    
-    This class initializes an OpenAI client and allows calling the API
-    with a prompt via the `__call__` method.
-    """
     def __init__(
             self,
             model: str,
             system_prompt: str
             ) -> None:
-        """Initialize the OpenAI API wrapper.
-
-        Args:
-            model (str): The default model to use for completions.
-            system_prompt (str): The system message to guide the model's behavior.
-        """
         super().__init__(model, system_prompt)
         available_models = (
             "gpt-4.1-nano",
@@ -170,16 +123,6 @@ class OpenAIAPI(AbstractLLMAPI):
             system_prompt: str = None,
             temperature: float = 0
             ) -> str:
-        """Call the OpenAI Chat Completion API with a user prompt.
-
-        Args:
-            prompt (str): The user's prompt.
-            system_prompt (str): The system message to guide the model's behavior.
-            temperature (float): Sampling temperature.
-
-        Returns:
-            str: The model's reply.
-        """
         if system_prompt is None:
             system_prompt = self.system_prompt
 
@@ -207,18 +150,7 @@ class OpenAIAPI(AbstractLLMAPI):
             *format_args,
             **format_kwargs
             ) -> str:
-        """Implementation for OpenAIAPI. Calls the LLM and returns the raw response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            str: Raw LLM response
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
-        logger.debug("Calling OpenAIAPI.tabulate_eligibility.")
         llm_response = self(prompt, self.system_prompt)
         return llm_response.strip()
 
@@ -228,42 +160,23 @@ class OpenAIAPI(AbstractLLMAPI):
             *format_args,
             **format_kwargs
             ) -> dict:
-        """Implementation for OpenAIAPI. Calls the LLM and parses JSON response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            dict: Parsed JSON response
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
-        logger.debug("Calling OpenAIAPI.tabulate_eligibility_json.")
         llm_response = self(prompt, self.system_prompt)
-        
+
         try:
             result = self.robust_json_parse(llm_response)
             if isinstance(result, dict) and 'headers' in result and 'entries' in result:
-                logger.info("OpenAIAPI returned valid tabulated eligibility JSON.")
                 return result
             else:
-                logger.error("OpenAIAPI response missing 'headers' or 'entries'. Returning empty result.")
+                logger.error("Response missing 'headers' or 'entries'.")
                 return {'headers': [], 'entries': []}
         except Exception as e:
-            logger.error(f"Failed to robustly parse OpenAIAPI response as JSON: {e}")
+            logger.error(f"Failed to parse response as JSON: {e}")
             return {'headers': [], 'entries': []}
 
 
 class UCSFVersaAPI(AbstractLLMAPI):
-    """Wrapper for the UCSF Versa Azure OpenAI API.
-    Expects the following environment variables:
-      - UCSF_API_KEY
-      - UCSF_API_VER
-      - UCSF_RESOURCE_ENDPOINT
-    """
-    # Available Azure OpenAI models (class attribute for importability)
-    # Versioned names from Usage_data that ping OK: gpt-4.1-2025-04-14, gpt-4.1-mini-2025-04-14, gpt-4o-*
+    """Azure OpenAI API wrapper (UCSF Versa endpoint)."""
     available_models = (
         "gpt-35-turbo",
         "gpt-35-turbo-0301",
@@ -293,14 +206,12 @@ class UCSFVersaAPI(AbstractLLMAPI):
         "o3",
         "o4-mini",
         "o3-mini",
-        # Claude (from Usage_data; may 404 on some endpoints)
         "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "us.anthropic.claude-opus-4-1-20250805-v1:0",
         "us.anthropic.claude-opus-4-5-20251101-v1:0",
         "us.anthropic.claude-sonnet-4-20250514-v1:0",
     )
-    
-    # Default judge model (recommended for evaluation tasks)
+
     default_judge_model = "gpt-4o-2024-08-06"
     
     def __init__(
@@ -319,11 +230,9 @@ class UCSFVersaAPI(AbstractLLMAPI):
         self.max_retries = 2
         self.retry_secs = 3
 
-        # Remove trailing slash if present
         if self.resource_endpoint and self.resource_endpoint.endswith('/'):
             self.resource_endpoint = self.resource_endpoint.rstrip('/')
 
-        # Validate env vars
         missing = []
         if not self.api_key:
             missing.append("UCSF_API_KEY")
@@ -335,9 +244,8 @@ class UCSFVersaAPI(AbstractLLMAPI):
             logger.error(f"Missing required environment variables: {', '.join(missing)}")
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-        logger.info(f"UCSFVersaAPI client initialized for deployment '{model}' at '{self.resource_endpoint}' with API version '{self.api_version}'.")
+        logger.info(f"UCSFVersaAPI initialized: model={model}")
 
-        # Cost guard: require explicit opt-in for paid API usage
         self._cost_guard_acknowledged = os.getenv("RECITE_CONFIRM_PAID_API", "").lower() in ("1", "true", "yes")
         if not self._cost_guard_acknowledged:
             logger.warning(
@@ -364,7 +272,7 @@ class UCSFVersaAPI(AbstractLLMAPI):
         if system_prompt is None:
             system_prompt = self.system_prompt
 
-        deployment_id = self.model  # In Azure, this is the deployment name
+        deployment_id = self.model
         url = f"{self.resource_endpoint}/openai/deployments/{deployment_id}/chat/completions?api-version={self.api_version}"
 
         headers = {
@@ -379,7 +287,7 @@ class UCSFVersaAPI(AbstractLLMAPI):
             "temperature": temperature
         })
 
-        base_delay = float(self.retry_secs)  # First delay in seconds
+        base_delay = float(self.retry_secs)
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"Calling UCSF Versa API at {url}")
@@ -388,7 +296,6 @@ class UCSFVersaAPI(AbstractLLMAPI):
                 resp_json = response.json()
                 if "choices" in resp_json and resp_json["choices"]:
                     raw = resp_json["choices"][0]["message"].get("content")
-                    # Ensure we always return str (avoids AssertionError from downstream assert isinstance(..., str))
                     output = (raw.strip() if isinstance(raw, str) else (str(raw) if raw is not None else ""))
                     logger.info("UCSF Versa API call successful.")
                     return output
@@ -396,7 +303,6 @@ class UCSFVersaAPI(AbstractLLMAPI):
                     logger.error(f"UCSF Versa API response missing 'choices': {resp_json}")
                     return ""
             except requests.exceptions.HTTPError as e:
-                # 400 Bad Request: don't retry (invalid request, e.g. input too long)
                 if e.response is not None and e.response.status_code == 400:
                     logger.error(
                         "UCSF Versa API 400 Bad Request (do not retry). "
@@ -428,18 +334,7 @@ class UCSFVersaAPI(AbstractLLMAPI):
             *format_args,
             **format_kwargs
             ) -> str:
-        """Implementation for UCSFVersaAPI. Calls the LLM and returns the raw response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            str: Raw LLM response
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
-        logger.debug("Calling UCSFVersaAPI.tabulate_eligibility.")
         llm_response = self(prompt, self.system_prompt)
         return llm_response.strip()
 
@@ -449,29 +344,17 @@ class UCSFVersaAPI(AbstractLLMAPI):
             *format_args,
             **format_kwargs
             ) -> dict:
-        """Implementation for UCSFVersaAPI. Calls the LLM and parses JSON response.
-        
-        Args:
-            prompt_template (str): Template string with placeholders
-            *format_args: Positional arguments for template formatting
-            **format_kwargs: Keyword arguments for template formatting
-            
-        Returns:
-            dict: Parsed JSON response
-        """
         prompt = prompt_template.format(*format_args, **format_kwargs)
-        logger.debug("Calling UCSFVersaAPI.tabulate_eligibility_json.")
         llm_response = self(prompt, self.system_prompt)
 
         try:
             result = self.robust_json_parse(llm_response)
             if isinstance(result, dict) and 'headers' in result and 'entries' in result:
-                logger.info("UCSFVersaAPI returned valid tabulated eligibility JSON.")
                 return result
             else:
-                logger.error("UCSFVersaAPI response missing 'headers' or 'entries'. Returning empty result.")
+                logger.error("Response missing 'headers' or 'entries'.")
                 return {'headers': [], 'entries': []}
         except Exception as e:
-            logger.error(f"Failed to robustly parse UCSFVersaAPI response as JSON: {e}")
+            logger.error(f"Failed to parse response as JSON: {e}")
             return {'headers': [], 'entries': []}
 

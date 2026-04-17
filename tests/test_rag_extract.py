@@ -5,7 +5,7 @@ Tests the core LLM-response parsing logic: JSON extraction, heuristic fallbacks,
 normalization. No LLM calls — feeds synthetic LLM outputs directly.
 """
 
-from recite.accrual.parsing import (
+from recite.ec_impact.parsing import (
     parse_directives_response,
     parse_impact_response,
     _robust_json_parse,
