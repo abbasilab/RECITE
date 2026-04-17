@@ -1,18 +1,9 @@
-# Active Paths (for current/production code)
-# ===========================================
+# Paths used by the benchmark pipeline
+# ======================================
 
-# Config Files
-config:
-  criteria_labels: "config/criteria-classification/labels.json"
-  criteria_labels_subset: "config/criteria-classification/labels_subset.json"
-  llm_prompts: "config/prompts/llm_prompts.json"
-
-# Data Directories & Files
+# Data Directories
 data:
   benchmarks: "data/benchmarks"
-  clinicaltrialsgov: "data/clinicaltrialsgov"
-  sigir: "data/sigir"
-  clintrialm_db: "data/clintrialm.db"
 
 # Cache Directories (for model weights)
 cache:
@@ -24,29 +15,3 @@ output:
   analysis: "output/analysis"
   pipeline: "output/pipeline"
   figs: "figs"
-
-# Script Locations (for reference)
-scripts:
-  active: "scripts"  # Currently empty, but for future use
-
-# Legacy Paths (for deprecated/archived code)
-# ============================================
-
-# Legacy Config Files (same as active, but documented here for clarity)
-legacy_config:
-  criteria_labels: "config/legacy/criteria-classification/labels.json"
-  criteria_labels_subset: "config/legacy/criteria-classification/labels_subset.json"
-  llm_prompts: "config/legacy/prompts/llm_prompts.json"
-
-# Legacy Script Locations
-legacy_scripts:
-  criteria_classification: "scripts/legacy/criteria-classification"
-  analyze_criteria_types: "scripts/legacy/analyze_criteria_types.py"
-  ctg_xml_to_json: "scripts/legacy/ctg_xml_to_json.py"
-  get_eligil_papers: "scripts/legacy/get-eligil-loosening-papers"
-  tabulate: "scripts/legacy/tabulate.py"
-
-# Legacy Data/Output (if different from active)
-legacy_output:
-  analysis: "output/analysis"  # Same as active
-  pipeline: "output/pipeline"  # Same as active

@@ -584,9 +584,18 @@ def call_model_with_retry(
         if wait_for_revive_seconds <= 0:
             return False
         try:
-            from recite.crawler.llm import wait_for_server_ready
+            import time as _time
             wait_secs = min(wait_for_revive_seconds, 60)
-            return wait_for_server_ready(endpoint, max_wait_seconds=wait_secs)
+            deadline = _time.monotonic() + wait_secs
+            while _time.monotonic() < deadline:
+                try:
+                    r = httpx.get(f"{endpoint}/models", timeout=5)
+                    if r.status_code == 200:
+                        return True
+                except Exception:
+                    pass
+                _time.sleep(2)
+            return False
         except Exception:
             return False
 
@@ -690,7 +699,7 @@ def _query_with_rag_retry(
     ucsf_versa_model: Optional[str] = None,
 ) -> str:
     """Call query_with_rag with retry logic."""
-    from recite.rag import query_with_rag
+    raise NotImplementedError("RAG mode not available in this build")
 
     kwargs: Dict[str, Any] = {
         "system_prompt": system_prompt or "",
@@ -726,9 +735,20 @@ def _query_with_rag_retry(
             if attempt < max_retries - 1:
                 if wait_for_revive_seconds > 0 and not ucsf_versa_model:
                     try:
-                        from recite.crawler.llm import wait_for_server_ready
+                        import time as _time
                         wait_secs = min(wait_for_revive_seconds, 60)
-                        if wait_for_server_ready(llm_base_url, max_wait_seconds=wait_secs):
+                        deadline = _time.monotonic() + wait_secs
+                        revived = False
+                        while _time.monotonic() < deadline:
+                            try:
+                                r = httpx.get(f"{llm_base_url}/models", timeout=5)
+                                if r.status_code == 200:
+                                    revived = True
+                                    break
+                            except Exception:
+                                pass
+                            _time.sleep(2)
+                        if revived:
                             continue
                     except Exception:
                         pass

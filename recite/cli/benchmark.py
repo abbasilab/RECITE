@@ -931,7 +931,15 @@ def run_benchmark(
       uv run recite benchmark run-benchmark --config config/benchmarks.yaml --include-test
     """
     from recite.benchmark.evaluator import run_benchmark as _run_benchmark
-    from recite.crawler.llm import check_server_health
+
+    def check_server_health(endpoint: str, timeout: int = 5) -> bool:
+        """Quick reachability check: GET the endpoint root."""
+        import httpx
+        try:
+            r = httpx.get(f"{endpoint}/models", timeout=timeout)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     project_root = get_project_root()
     cfg_path = config_path if config_path is not None else project_root / "config" / "benchmarks.yaml"
