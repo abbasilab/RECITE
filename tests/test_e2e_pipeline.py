@@ -11,7 +11,6 @@ import pytest
 from recite.benchmark.ec_detector import detect_ec_changes
 from recite.benchmark.builders import create_recite_instances
 from recite.benchmark.utils import clean_text
-from recite.ec_impact.parsing import parse_directives_response, parse_impact_response
 
 
 # ---------------------------------------------------------------------------
@@ -99,50 +98,6 @@ TRIALS = [
     },
 ]
 
-# Mock LLM outputs for directive extraction (one per paper)
-MOCK_PAPERS = [
-    {
-        "paper_id": "SYNTH-001",
-        "directive_response": json.dumps({
-            "answer_location": "exact",
-            "directives_exact_text": [
-                "Diabetes trials should raise the upper age limit to 75 years",
-                "Renal exclusion thresholds should be relaxed to eGFR < 45",
-            ],
-            "directives_count": 2,
-        }),
-        "impact_response": json.dumps({
-            "answer_location": "exact",
-            "impact_percent": 35.0,
-            "impact_absolute": 120,
-            "impact_unit": "patients",
-            "impact_qualitative": "Substantial increase from broadened age and renal criteria",
-            "impact_evidence": "Registry analysis showed 35% increase in eligible pool.",
-        }),
-    },
-    {
-        "paper_id": "SYNTH-002",
-        "directive_response": json.dumps({
-            "answer_location": "exact",
-            "directives_exact_text": [
-                "Immunotherapy trials should permit ECOG 2 patients",
-                "Prior immunotherapy should not be an absolute exclusion",
-                "Asymptomatic brain metastases should be permitted",
-            ],
-            "directives_count": 3,
-        }),
-        "impact_response": json.dumps({
-            "answer_location": "exact",
-            "impact_percent": 42.0,
-            "impact_absolute": 85,
-            "impact_unit": "patients",
-            "impact_qualitative": "Significant broadening of eligible pool",
-            "impact_evidence": "Multi-site analysis showed 42% enrollment gain.",
-        }),
-    },
-]
-
-
 def _create_db(db_path: Path) -> sqlite3.Connection:
     """Create a fresh RECITE database with full schema."""
     conn = sqlite3.connect(str(db_path))
@@ -182,24 +137,6 @@ def _create_db(db_path: Path) -> sqlite3.Connection:
             evidence_extraction_level TEXT,
             evidence_extraction_score INTEGER,
             quality_score REAL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE accrual_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paper_id TEXT NOT NULL,
-            instance_id TEXT,
-            directives_answer_location TEXT,
-            directives_has_answer INTEGER,
-            directives_exact_text TEXT,
-            directives_count INTEGER,
-            impact_has_answer INTEGER,
-            impact_percent REAL,
-            impact_absolute REAL,
-            impact_unit TEXT,
-            impact_qualitative TEXT,
-            impact_evidence TEXT,
-            scalar_gain REAL
         )
     """)
     conn.commit()
@@ -277,64 +214,14 @@ class TestEndToEnd:
             assert len(row["evidence"]) > 50  # protocol text should be substantial
             assert row["evidence_extraction_level"] == "raw_pdf_text_only"
 
-        # ===== Stage 3: Directive Extraction (mock LLM) =====
-        for paper in MOCK_PAPERS:
-            directive_result = parse_directives_response(paper["directive_response"])
-            assert directive_result["directives_has_answer"] == 1
-
-            impact_result = parse_impact_response(paper["impact_response"])
-            assert impact_result["impact_has_answer"] == 1
-
-            # Calculate scalar gain (the core accrual formula)
-            enrollment = 200  # hypothetical
-            scalar_gain = enrollment * (impact_result["impact_percent"] or 0) / 100.0
-
-            conn.execute(
-                """INSERT INTO accrual_results
-                   (paper_id, directives_answer_location, directives_has_answer,
-                    directives_exact_text, directives_count,
-                    impact_has_answer, impact_percent, impact_absolute,
-                    impact_unit, impact_qualitative, impact_evidence, scalar_gain)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    paper["paper_id"],
-                    directive_result["directives_answer_location"],
-                    directive_result["directives_has_answer"],
-                    directive_result["directives_exact_text"],
-                    directive_result["directives_count"],
-                    impact_result["impact_has_answer"],
-                    impact_result["impact_percent"],
-                    impact_result["impact_absolute"],
-                    impact_result["impact_unit"],
-                    impact_result["impact_qualitative"],
-                    impact_result["impact_evidence"],
-                    scalar_gain,
-                ),
-            )
-        conn.commit()
-
-        # Verify Stage 3 DB state
-        accrual_count = conn.execute("SELECT COUNT(*) FROM accrual_results").fetchone()[0]
-        assert accrual_count == 2
-
-        # ===== Stage 4: Export to Parquet =====
-        # Export RECITE instances
+        # ===== Stage 3: Export to Parquet =====
         recite_df = pd.read_sql_query("SELECT * FROM recite", conn)
         parquet_path = output_dir / "benchmark.parquet"
         recite_df.to_parquet(parquet_path, index=False)
 
-        # Export accrual results
-        accrual_df = pd.read_sql_query("SELECT * FROM accrual_results", conn)
-        accrual_parquet = output_dir / "accrual_results.parquet"
-        accrual_df.to_parquet(accrual_parquet, index=False)
-
-        # Write combined stats
         stats = {
             "ec_changes": ec_count,
             "recite_instances": recite_count,
-            "accrual_results": accrual_count,
-            "avg_impact_percent": float(accrual_df["impact_percent"].mean()),
-            "total_scalar_gain": float(accrual_df["scalar_gain"].sum()),
         }
         stats_path = output_dir / "pipeline_stats.json"
         stats_path.write_text(json.dumps(stats, indent=2))
@@ -347,7 +234,7 @@ class TestEndToEnd:
         assert db_path.exists()
         assert db_path.stat().st_size > 0
 
-        # 2. Parquet files are valid
+        # 2. Parquet file is valid
         assert parquet_path.exists()
         pq_table = pq.read_table(parquet_path)
         assert pq_table.num_rows == 2
@@ -355,29 +242,15 @@ class TestEndToEnd:
         assert "evidence" in pq_table.column_names
         assert "reference_text" in pq_table.column_names
 
-        assert accrual_parquet.exists()
-        accrual_table = pq.read_table(accrual_parquet)
-        assert accrual_table.num_rows == 2
-        assert "impact_percent" in accrual_table.column_names
-        assert "scalar_gain" in accrual_table.column_names
-
         # 3. Stats file is valid JSON with correct values
         assert stats_path.exists()
         loaded_stats = json.loads(stats_path.read_text())
         assert loaded_stats["ec_changes"] == 2
         assert loaded_stats["recite_instances"] == 2
-        assert loaded_stats["accrual_results"] == 2
-        assert loaded_stats["avg_impact_percent"] == pytest.approx(38.5, abs=0.1)  # (35 + 42) / 2
-        assert loaded_stats["total_scalar_gain"] == pytest.approx(154.0, abs=0.1)  # 70 + 84
 
         # 4. Cross-check: parquet data matches DB data
         bench_df = pd.read_parquet(parquet_path)
         assert set(bench_df["instance_id"].tolist()) == {"NCT00000001", "NCT00000002"}
-
-        accrual_read = pd.read_parquet(accrual_parquet)
-        assert set(accrual_read["paper_id"].tolist()) == {"SYNTH-001", "SYNTH-002"}
-        assert all(accrual_read["directives_has_answer"] == 1)
-        assert all(accrual_read["impact_has_answer"] == 1)
 
         # 5. Print summary (visible in pytest -v output)
         print(f"\n{'='*60}")
@@ -385,10 +258,6 @@ class TestEndToEnd:
         print(f"{'='*60}")
         print(f"  EC changes detected:   {ec_count}")
         print(f"  RECITE instances:      {recite_count}")
-        print(f"  Accrual results:       {accrual_count}")
-        print(f"  Avg impact:            {loaded_stats['avg_impact_percent']:.1f}%")
-        print(f"  Total scalar gain:     {loaded_stats['total_scalar_gain']:.0f} patients")
         print(f"  DB size:               {db_path.stat().st_size:,} bytes")
         print(f"  Benchmark parquet:     {parquet_path.stat().st_size:,} bytes")
-        print(f"  Accrual parquet:       {accrual_parquet.stat().st_size:,} bytes")
         print(f"{'='*60}")

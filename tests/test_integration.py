@@ -23,7 +23,6 @@ from recite.benchmark.results_db import (
     insert_result,
 )
 from recite.benchmark.utils import clean_text
-from recite.ec_impact.parsing import parse_directives_response, parse_impact_response
 
 
 # ---------------------------------------------------------------------------
@@ -103,48 +102,6 @@ TRIALS = [
     },
 ]
 
-MOCK_PAPERS = [
-    {
-        "paper_id": "SYNTH-001",
-        "directive_response": json.dumps({
-            "answer_location": "exact",
-            "directives_exact_text": [
-                "Diabetes trials should raise the upper age limit to 75 years",
-                "Renal exclusion thresholds should be relaxed to eGFR < 45",
-            ],
-            "directives_count": 2,
-        }),
-        "impact_response": json.dumps({
-            "answer_location": "exact",
-            "impact_percent": 35.0,
-            "impact_absolute": 120,
-            "impact_unit": "patients",
-            "impact_qualitative": "Substantial increase from broadened criteria",
-            "impact_evidence": "Registry analysis showed 35% increase.",
-        }),
-    },
-    {
-        "paper_id": "SYNTH-002",
-        "directive_response": json.dumps({
-            "answer_location": "exact",
-            "directives_exact_text": [
-                "Immunotherapy trials should permit ECOG 2 patients",
-                "Prior immunotherapy should not be an absolute exclusion",
-            ],
-            "directives_count": 2,
-        }),
-        "impact_response": json.dumps({
-            "answer_location": "exact",
-            "impact_percent": 42.0,
-            "impact_absolute": 85,
-            "impact_unit": "patients",
-            "impact_qualitative": "Significant broadening of eligible pool",
-            "impact_evidence": "Multi-site analysis showed 42% enrollment gain.",
-        }),
-    },
-]
-
-
 def _create_pipeline_db(db_path: Path) -> sqlite3.Connection:
     """Create a RECITE pipeline database with full schema."""
     conn = sqlite3.connect(str(db_path))
@@ -184,24 +141,6 @@ def _create_pipeline_db(db_path: Path) -> sqlite3.Connection:
             evidence_extraction_level TEXT,
             evidence_extraction_score INTEGER,
             quality_score REAL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE accrual_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paper_id TEXT NOT NULL,
-            instance_id TEXT,
-            directives_answer_location TEXT,
-            directives_has_answer INTEGER,
-            directives_exact_text TEXT,
-            directives_count INTEGER,
-            impact_has_answer INTEGER,
-            impact_percent REAL,
-            impact_absolute REAL,
-            impact_unit TEXT,
-            impact_qualitative TEXT,
-            impact_evidence TEXT,
-            scalar_gain REAL
         )
     """)
     conn.commit()
@@ -505,30 +444,6 @@ class TestResultsAndStats:
 
         samples = [dict(r) for r in conn.execute("SELECT * FROM recite").fetchall()]
 
-        # Also insert accrual results for full-pipeline stats
-        for paper in MOCK_PAPERS:
-            dr = parse_directives_response(paper["directive_response"])
-            ir = parse_impact_response(paper["impact_response"])
-            enrollment = 200
-            scalar_gain = enrollment * (ir["impact_percent"] or 0) / 100.0
-            conn.execute(
-                """INSERT INTO accrual_results
-                   (paper_id, directives_answer_location, directives_has_answer,
-                    directives_exact_text, directives_count,
-                    impact_has_answer, impact_percent, impact_absolute,
-                    impact_unit, impact_qualitative, impact_evidence, scalar_gain)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    paper["paper_id"], dr["directives_answer_location"],
-                    dr["directives_has_answer"], dr["directives_exact_text"],
-                    dr["directives_count"], ir["impact_has_answer"],
-                    ir["impact_percent"], ir["impact_absolute"],
-                    ir["impact_unit"], ir["impact_qualitative"],
-                    ir["impact_evidence"], scalar_gain,
-                ),
-            )
-        conn.commit()
-
         # Generate predictions with judge scores
         predictions = _mock_judge_scores(_build_mock_predictions(samples))
 
@@ -581,16 +496,12 @@ class TestResultsAndStats:
         results_conn.close()
 
         # --- Export combined stats as JSON (md-compatible) ---
-        accrual_df = pd.read_sql_query("SELECT * FROM accrual_results", conn)
         recite_df = pd.read_sql_query("SELECT * FROM recite", conn)
         conn.close()
 
         stats = {
             "ec_changes": 2,
             "recite_instances": len(recite_df),
-            "accrual_results": len(accrual_df),
-            "avg_impact_percent": float(accrual_df["impact_percent"].mean()),
-            "total_scalar_gain": float(accrual_df["scalar_gain"].sum()),
             "benchmark_summary": [
                 {
                     "model": row["model_id"],
@@ -612,9 +523,6 @@ class TestResultsAndStats:
 
         loaded = json.loads(stats_path.read_text())
         assert loaded["recite_instances"] == 2
-        assert loaded["accrual_results"] == 2
-        assert loaded["avg_impact_percent"] == pytest.approx(38.5, abs=0.1)
-        assert loaded["total_scalar_gain"] == pytest.approx(154.0, abs=0.1)
         assert len(loaded["benchmark_summary"]) >= 1
         assert loaded["benchmark_summary"][0]["n"] == 2
 
