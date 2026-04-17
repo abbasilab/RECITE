@@ -1,8 +1,4 @@
-"""
-EC (Eligibility Criteria) Change Detection Module
-
-Detects meaningful changes between eligibility criteria versions.
-"""
+"""Eligibility criteria change detection."""
 
 import difflib
 from typing import Any, Dict, List, Optional, Tuple

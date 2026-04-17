@@ -1,8 +1,4 @@
-"""
-Protocol PDF parser for RECITE benchmark.
-
-Extracts amendment tables, EC changes, and rationales from protocol PDFs.
-"""
+"""Protocol PDF parser for amendment tables and EC changes."""
 
 import json
 import re

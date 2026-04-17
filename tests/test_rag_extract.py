@@ -1,9 +1,4 @@
-"""
-Smoke tests for directive and impact extraction (parsing module).
-
-Tests the core LLM-response parsing logic: JSON extraction, heuristic fallbacks,
-normalization. No LLM calls — feeds synthetic LLM outputs directly.
-"""
+"""Smoke tests for directive and impact extraction parsing."""
 
 from recite.ec_impact.parsing import (
     parse_directives_response,

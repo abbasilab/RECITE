@@ -1,15 +1,4 @@
-"""
-Integration tests for the RECITE pipeline.
-
-5 tests covering each stage end-to-end:
-1. Data Loading — live ClinicalTrials.gov API (network)
-2. Data Processing — sqlite DB + parquet export
-3. Prediction Generation — mocked LLM responses
-4. Benchmark Execution (Judging) — mocked judge
-5. Results & Stats — metrics computation and summary output
-
-No real LLM/API calls in tests 3-5 — mocks only.
-"""
+"""Integration tests for the RECITE pipeline."""
 
 import json
 import sqlite3

@@ -1,9 +1,4 @@
-"""
-Trial discovery module for RECITE benchmark.
-
-Discovers all NCT IDs from ClinicalTrials.gov using bulk XML download
-or API pagination methods.
-"""
+"""Trial discovery from ClinicalTrials.gov."""
 
 import json
 import tempfile

@@ -1,8 +1,4 @@
-"""
-Evidence source downloader for RECITE benchmark.
-
-Downloads evidence documents (PDFs, API fields, etc.) based on exploration results.
-"""
+"""Evidence source downloader."""
 
 import json
 from pathlib import Path

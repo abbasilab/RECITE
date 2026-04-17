@@ -1,10 +1,4 @@
-"""
-parquet_exporter.py
-
-Export RECITE benchmark data to parquet files.
-Standard: one combined parquet (benchmark.parquet) for the ~3k benchmark set.
-Legacy: train/val/test splits via export_to_parquet_splits.
-"""
+"""Export RECITE benchmark data to parquet files."""
 
 import json
 import sqlite3

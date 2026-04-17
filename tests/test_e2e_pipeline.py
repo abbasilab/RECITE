@@ -1,10 +1,4 @@
-"""
-End-to-end integration test for the RECITE pipeline.
-
-Runs all 4 stages on synthetic data with real DB + parquet outputs.
-No LLM calls — mock responses simulate what the LLM would return.
-Verifies: DB rows, parquet files, stats JSON, data integrity across stages.
-"""
+"""End-to-end integration test for the RECITE pipeline."""
 
 import json
 import sqlite3

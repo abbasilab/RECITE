@@ -1,8 +1,4 @@
-"""
-Shared utilities for moduleLabels extraction and processing.
-
-Following DRY principles to avoid duplicating moduleLabels parsing logic.
-"""
+"""Module labels extraction and processing."""
 
 import json
 from typing import Any, Dict, List

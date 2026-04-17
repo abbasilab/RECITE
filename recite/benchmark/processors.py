@@ -1,8 +1,4 @@
-"""
-Processors module for RECITE benchmark.
-
-Handles EC change detection and evidence extraction.
-"""
+"""EC change detection and evidence extraction."""
 
 import json
 import sqlite3

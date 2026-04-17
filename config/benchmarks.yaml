@@ -1,8 +1,4 @@
-# DEFAULT: Full benchmark config with all models (cluster A + B).
-# Use this for single-machine runs or reference. For multi-machine, use:
-#   - benchmarks_train_*.yaml (train split, ~3k samples)
-#   - benchmarks_eval_*.yaml  (eval split, ~8.8k samples)
-# Run: uv run recite.py run --config config/benchmarks.yaml --backend all
+# Full benchmark config with all models.
 
 rag:
   embed_base_url: ""
@@ -15,7 +11,6 @@ rag:
   sweep_no_rag: true
 
 models:
-  # Versa (cluster A)
   - id: versa-4o
     api_type: ucsf_versa
     model: gpt-4o-2024-08-06
@@ -24,7 +19,6 @@ models:
     api_type: ucsf_versa
     model: gpt-4o-mini-2024-07-18
     context_window: 128000
-  # Local (cluster A)
   - id: local-qwen-0.5b
     api_type: python_gpu
     model: Qwen/Qwen2.5-0.5B-Instruct
@@ -45,7 +39,6 @@ models:
     model: google/gemma-2-2b-it
     gpus: 1
     context_window: 8192
-  # Local (cluster B)
   - id: local-gemma2-9b
     api_type: python_gpu
     model: google/gemma-2-9b-it

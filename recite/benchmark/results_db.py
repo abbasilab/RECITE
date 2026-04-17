@@ -1,9 +1,4 @@
-"""
-Benchmark results SQLite: configs table + per-config result tables.
-
-Stores experiment configs (with content-addressed id/fingerprint) and one results
-table per config. Matching uses config_fingerprint or multi-field comparison.
-"""
+"""Benchmark results SQLite storage with content-addressed configs."""
 
 import hashlib
 import json

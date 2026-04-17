@@ -1,8 +1,4 @@
-"""
-Pipeline orchestrator for RECITE benchmark.
-
-Orchestrates the full E2E pipeline with progressive filtering.
-"""
+"""Pipeline orchestrator for RECITE benchmark."""
 
 import json
 import sqlite3

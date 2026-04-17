@@ -1,8 +1,4 @@
-"""
-Downloaders module for RECITE benchmark.
-
-Handles downloading trial versions and protocol PDFs.
-"""
+"""Download trial versions and protocol PDFs."""
 
 import json
 import sqlite3

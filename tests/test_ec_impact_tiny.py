@@ -1,10 +1,4 @@
-"""
-Smoke tests for the accrual scoring pipeline.
-
-Tests the end-to-end flow: fixture data → DB → EC diff → triplet → parse outputs.
-Validates that scoring/matching helpers work on synthetic data.
-No LLM calls — exercises DB operations and parsing on fixtures.
-"""
+"""Smoke tests for the accrual scoring pipeline."""
 
 import json
 import sqlite3

@@ -1,12 +1,4 @@
-"""
-Lazy streaming over benchmark data.
-
-Supports two backends:
-1. Parquet files (stream_parquet_splits) - legacy, requires export step
-2. Direct DB (stream_from_db) - no export needed, reads from recite.db
-
-Yields (split_name, row_dict) in batches to control memory.
-"""
+"""Lazy streaming over benchmark data from parquet or DB."""
 
 import json
 import sqlite3
