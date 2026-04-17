@@ -6,7 +6,7 @@ A benchmark for evaluating LLMs on eligibility criteria revision using protocol 
 
 ## Prompts & Methodology
 
-Detailed prompts (model prompts, judge rubrics, two-step approach) are temporarily withheld pending UCSF provisional patent filing. The full methodology will be released within approximately 2 months once filing is confirmed. The JSON structure in `config/benchmark_prompts.json` shows the expected schema — prompt text will be restored in place.
+The full prompt text (model prompts, judge rubrics, two-step approach) will be released within approximately 2 months as we complete a routine institutional IP process. The JSON structure in `config/benchmark_prompts.json` shows the expected schema, and prompt text will be restored in place once this process concludes. All other code, data, and evaluation infrastructure are fully available.
 
 ## License
 
