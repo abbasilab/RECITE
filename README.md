@@ -2,7 +2,7 @@
 
 **Revising Eligibility Criteria Incorporating Textual Evidence**
 
-A benchmark for evaluating LLMs on eligibility criteria revision using protocol amendment evidence from ClinicalTrials.gov. 3,116 instances across 5,735 trials, with LLM-as-judge evaluation.
+A benchmark for evaluating LLMs on eligibility criteria revision using protocol amendment evidence from ClinicalTrials.gov.
 
 ## License
 
