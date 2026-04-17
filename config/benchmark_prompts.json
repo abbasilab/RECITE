@@ -1,27 +1,28 @@
 {
+  "_notice": "Detailed prompts are withheld pending UCSF provisional patent filing. Full methodology will be released within approximately 2 months once filing is confirmed.",
   "model_prompt": {
-    "system": "You are an expert at modifying clinical trial eligibility criteria based on supporting evidence. Your task is to generate amended eligibility criteria that incorporate the evidence provided while maintaining clinical accuracy and relevance.",
-    "user_template": "Version context: This task is for the transition from ClinicalTrials.gov version {source_version} to version {target_version}. The evidence may use different labels (e.g. \"Amendment 1\", \"Version 2.0\") that do not always match our version numbers 1:1; use the evidence to infer the intended change.\n\nOriginal Eligibility Criteria (version {source_version}):\n{source_text}\n\nGenerate the modified eligibility criteria for version {target_version}. Return only the amended eligibility criteria text, without additional explanation.",
-    "user_template_rag": "Version context: This task is for the transition from ClinicalTrials.gov version {source_version} to version {target_version}. The evidence may use different labels (e.g. \"Amendment 1\", \"Version 2.0\") that do not always match our version numbers 1:1; use the evidence to infer the intended change.\n\nOriginal Eligibility Criteria (version {source_version}):\n{source_text}\n\nUse the retrieved supporting evidence (provided below) to generate the modified eligibility criteria for version {target_version}. Return only the amended eligibility criteria text, without additional explanation."
+    "system": "[REDACTED — pending patent filing]",
+    "user_template": "[REDACTED — pending patent filing]",
+    "user_template_rag": "[REDACTED — pending patent filing]"
   },
-  "step1_system": "You are an expert at analyzing clinical trial protocol documents and amendment tables. Your task is to infer how version numbers (e.g. ClinicalTrials.gov version numbers) map to amendments or sections in the document.",
-  "step1_user_template": "Given the document provided below, describe how version numbers map to amendments or sections.\n\nOutput a short, structured mapping: for each version number mentioned or implied, which amendment or section in the document corresponds to it. Note any off-by-one or non-standard indexing (e.g. \"Version 1 = initial; Version 2 = Amendment 1 (date …); Version 3 = Amendment 2\").",
-  "step2_system": "You are an expert at modifying clinical trial eligibility criteria based on supporting evidence. Using the versioning schema from a previous step, you must identify the evidence that corresponds to the target next version and produce only the revised eligibility criteria for that single version step.",
-  "step2_user_template": "Versioning schema from previous step:\n{schema}\n\nTarget next version for this task: target_version = {target_version} (from source_version = {source_version}).\n\nCurrent eligibility criteria:\n{source_text}\n\nUsing the document provided below, identify the amendment or section that corresponds to version {target_version} and produce the revised eligibility criteria after that amendment only. Output only the revised eligibility criteria text, without additional explanation.",
+  "step1_system": "[REDACTED — pending patent filing]",
+  "step1_user_template": "[REDACTED — pending patent filing]",
+  "step2_system": "[REDACTED — pending patent filing]",
+  "step2_user_template": "[REDACTED — pending patent filing]",
   "judge_prompt": {
-    "system": "You are an expert evaluator assessing the quality of eligibility criteria predictions. Your task is to score how well a predicted eligibility criteria matches the target criteria.",
-    "user_template": "Evaluate how well the predicted eligibility criteria matches the target criteria.\n\nTarget Eligibility Criteria:\n{ground_truth}\n\nPredicted Eligibility Criteria:\n{prediction}\n\nProvide two scores:\n\n1. Binary score (0 or 1): Is the prediction correct?\n   - 0 = Incorrect\n   - 1 = Correct\n\n2. Ordinal score (0-4): How good is the match?\n   - 0 = No match – prediction is unrelated or contradicts target\n   - 1 = Poor match – minimal overlap, major omissions or errors\n   - 2 = Partial match – some key elements correct, notable gaps\n   - 3 = Good match – most elements correct, minor differences\n   - 4 = Excellent match – essentially identical or fully correct\n\nRespond with ONLY two numbers separated by a comma: binary_score,ordinal_score\nExample: 1,3",
+    "system": "[REDACTED — pending patent filing]",
+    "user_template": "[REDACTED — pending patent filing]",
     "score_scale": "0-4"
   },
   "judge_prompt_batched": {
-    "system": "You are an expert evaluator assessing the quality of eligibility criteria predictions. Score multiple prediction pairs. For each pair, provide binary (0 or 1) and ordinal (0-4) scores as in the single-pair format.",
-    "user_template": "Evaluate the following {n} prediction pairs. For each pair, score how well the predicted eligibility criteria matches the target.\n\n{pairs}\n\nReturn scores in JSON format only: {{\"1\": [binary, ordinal], \"2\": [binary, ordinal], ...}} where keys are pair numbers (1 to {n}). Example: {{\"1\": [1, 4], \"2\": [0, 2]}}.",
+    "system": "[REDACTED — pending patent filing]",
+    "user_template": "[REDACTED — pending patent filing]",
     "score_scale": "0-4"
   },
   "multi_stage_prompts": {
-    "step1_system": "You are an expert at analyzing clinical trial protocol documents. Your task is to infer how version numbers (e.g. ClinicalTrials.gov version numbers) map to amendments or sections in the document. The document may use 'Amendment 1', 'Amendment 2', dates, or other labels; version numbers may be 0-based or 1-based and may not align 1:1 with amendment numbers.",
-    "step1_user_template": "Given the document provided below, describe how version numbers map to amendments or sections.\n\nOutput a short, structured mapping: for each version number mentioned or implied, which amendment or section in the document corresponds to it. Note any off-by-one or non-standard indexing (e.g. 'Version 2 corresponds to Amendment 1').\n\nProvide only the version-to-amendment mapping, no other commentary.",
-    "step2_system": "You are an expert at modifying clinical trial eligibility criteria based on supporting evidence. You are given a versioning schema (how version numbers map to amendments in the document), the target next version number, and the current eligibility criteria. Your task is to identify the evidence that corresponds to that next version only and produce the revised eligibility criteria after that single amendment.",
-    "step2_user_template": "Versioning schema (from previous step):\n{schema}\n\nTarget next version for this task: target_version = {target_version} (from source_version = {source_version}).\n\nCurrent eligibility criteria:\n{source_text}\n\nUsing the document provided below, identify the amendment or section that corresponds to target_version = {target_version}. Produce only the revised eligibility criteria after that single amendment. Output only the amended eligibility criteria text, without additional explanation."
+    "step1_system": "[REDACTED — pending patent filing]",
+    "step1_user_template": "[REDACTED — pending patent filing]",
+    "step2_system": "[REDACTED — pending patent filing]",
+    "step2_user_template": "[REDACTED — pending patent filing]"
   }
 }
