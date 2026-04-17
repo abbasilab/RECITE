@@ -53,4 +53,5 @@ testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests (may require API keys)",
     "slow: slow tests",
+    "network: tests that require network access (live API calls)",
 ]
