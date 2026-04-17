@@ -851,19 +851,19 @@ def run_benchmark(
         help="Enable LLM judge evaluator: 'llm_judge' (adds LLM judge to default metrics) or 'default' (only default metrics: BLEU/ROUGE/edit distance). Default evaluator always runs."
     ),
     judge_api_type: str = typer.Option(
-        "ucsf_versa",
+        "azure_openai",
         "--judge-api-type",
-        help="Judge API type: 'ucsf_versa' (default) or 'endpoint'"
+        help="Judge API type: 'azure_openai' (default) or 'endpoint'"
     ),
     judge_model_type: str = typer.Option(
         "4o",
         "--judge-model-type",
-        help="Judge model type for UCSF Versa API: '4o' (default, gpt-4o-2024-08-06), '4o-mini', '4.5-preview', or full model name"
+        help="Judge model type for Azure OpenAI API: '4o' (default, gpt-4o-2024-08-06), '4o-mini', '4.5-preview', or full model name"
     ),
     confirm_paid_judge: bool = typer.Option(
         False,
         "--confirm-paid-judge",
-        help="REQUIRED when using paid judge APIs (ucsf_versa). Acknowledges that judge calls cost real money. Without this flag, paid judge runs will abort with a cost warning."
+        help="REQUIRED when using paid judge APIs (azure_openai). Acknowledges that judge calls cost real money. Without this flag, paid judge runs will abort with a cost warning."
     ),
     judge_endpoint: Optional[str] = typer.Option(
         None,
@@ -873,7 +873,7 @@ def run_benchmark(
     judge_model: Optional[str] = typer.Option(
         None,
         "--judge-model",
-        help="Model name for judge evaluator. If not provided, uses --judge-model-type for UCSF or required for endpoint"
+        help="Model name for judge evaluator. If not provided, uses --judge-model-type for Azure OpenAI or required for endpoint"
     ),
     num_samples: Optional[int] = typer.Option(
         None,
@@ -1002,17 +1002,17 @@ def run_benchmark(
             "embed_base_url": r.get("embed_base_url") or os.environ.get("RAG_EMBED_URL", ""),
             "embed_model": r.get("embed_model") or os.environ.get("RAG_EMBED_MODEL", ""),
             "persist_dir": r.get("persist_dir", "data/llamaindex_cache"),
-            "embed_api_key": r.get("embed_api_key") or os.environ.get("RAG_EMBED_API_KEY") or os.environ.get("UCSF_API_KEY"),
-            "embed_api_version": r.get("embed_api_version") or os.environ.get("UCSF_API_VER") or os.environ.get("API_VERSION"),
+            "embed_api_key": r.get("embed_api_key") or os.environ.get("RAG_EMBED_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY"),
+            "embed_api_version": r.get("embed_api_version") or os.environ.get("AZURE_OPENAI_API_VERSION") or os.environ.get("API_VERSION"),
         }
         r_top_k = r.get("top_k")
         if r_top_k is not None and not isinstance(r_top_k, list):
             rag_config["similarity_top_k"] = r_top_k
         if r.get("similarity_top_k") is not None:
             rag_config["similarity_top_k"] = r["similarity_top_k"]
-        ucsf_endpoint = (os.environ.get("UCSF_RESOURCE_ENDPOINT") or "").strip().rstrip("/")
-        if ucsf_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
-            rag_config["embed_base_url"] = f"{ucsf_endpoint}/openai/deployments/{rag_config['embed_model']}"
+        azure_endpoint = (os.environ.get("AZURE_OPENAI_ENDPOINT") or "").strip().rstrip("/")
+        if azure_endpoint and not rag_config["embed_base_url"] and rag_config["embed_model"]:
+            rag_config["embed_base_url"] = f"{azure_endpoint}/openai/deployments/{rag_config['embed_model']}"
     sweep_no_rag = bool(bench_config.get("rag", {}).get("sweep_no_rag", False)) if bench_config else False
     sweep_rag = bool(bench_config.get("rag", {}).get("sweep_rag", True)) if bench_config else True
     no_rag_max_tokens: Optional[int] = None
@@ -1025,17 +1025,17 @@ def run_benchmark(
     single_model = model_endpoint and model_name
     if single_model and rag_config is None:
         import os
-        ucsf = (os.environ.get("UCSF_RESOURCE_ENDPOINT") or "").strip().rstrip("/")
-        embed_model = os.environ.get("RAG_EMBED_MODEL") or ("text-embedding-3-small-1-brim" if ucsf else "text-embedding-3-small")
+        azure_ep = (os.environ.get("AZURE_OPENAI_ENDPOINT") or "").strip().rstrip("/")
+        embed_model = os.environ.get("RAG_EMBED_MODEL") or ("text-embedding-3-small-1-brim" if azure_ep else "text-embedding-3-small")
         rag_config = {
             "embed_base_url": os.environ.get("RAG_EMBED_URL", ""),
             "embed_model": embed_model,
             "persist_dir": "data/llamaindex_cache",
-            "embed_api_key": os.environ.get("RAG_EMBED_API_KEY") or (os.environ.get("UCSF_API_KEY") if ucsf else None),
-            "embed_api_version": os.environ.get("UCSF_API_VER") or os.environ.get("API_VERSION"),
+            "embed_api_key": os.environ.get("RAG_EMBED_API_KEY") or (os.environ.get("AZURE_OPENAI_API_KEY") if azure_ep else None),
+            "embed_api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or os.environ.get("API_VERSION"),
         }
-        if ucsf and not rag_config["embed_base_url"]:
-            rag_config["embed_base_url"] = f"{ucsf}/openai/deployments/{embed_model}"
+        if azure_ep and not rag_config["embed_base_url"]:
+            rag_config["embed_base_url"] = f"{azure_ep}/openai/deployments/{embed_model}"
     if single_model:
         if not check_server_health(model_endpoint, timeout=5):
             logger.error(
@@ -1052,9 +1052,9 @@ def run_benchmark(
 
     evaluator_config = None
     if evaluator_type == "llm_judge":
-        from recite.llmapis import UCSFVersaAPI
+        from recite.llmapis import AzureOpenAIAPI
 
-        if judge_api_type == "ucsf_versa" and not confirm_paid_judge:
+        if judge_api_type == "azure_openai" and not confirm_paid_judge:
             logger.error(
                 "\n"
                 "╔══════════════════════════════════════════════════════════════╗\n"
@@ -1068,7 +1068,7 @@ def run_benchmark(
             )
             raise typer.Exit(code=1)
 
-        if judge_api_type == "ucsf_versa":
+        if judge_api_type == "azure_openai":
             model_type_map = {
                 "4o": "gpt-4o-2024-08-06",
                 "4o-mini": "gpt-4o-mini-2024-07-18",
@@ -1082,28 +1082,28 @@ def run_benchmark(
             else:
                 logger.info(f"Using judge model: {judge_model}")
             
-            if judge_model not in UCSFVersaAPI.available_models:
+            if judge_model not in AzureOpenAIAPI.available_models:
                 logger.error(
-                    f"Judge model '{judge_model}' is not in available models: {UCSFVersaAPI.available_models}"
+                    f"Judge model '{judge_model}' is not in available models: {AzureOpenAIAPI.available_models}"
                 )
                 raise typer.Exit(code=1)
             
             import os
             missing_env = []
-            if not os.getenv("UCSF_API_KEY"):
-                missing_env.append("UCSF_API_KEY")
-            if not os.getenv("UCSF_API_VER"):
-                missing_env.append("UCSF_API_VER")
-            if not os.getenv("UCSF_RESOURCE_ENDPOINT"):
-                missing_env.append("UCSF_RESOURCE_ENDPOINT")
+            if not os.getenv("AZURE_OPENAI_API_KEY"):
+                missing_env.append("AZURE_OPENAI_API_KEY")
+            if not os.getenv("AZURE_OPENAI_API_VERSION"):
+                missing_env.append("AZURE_OPENAI_API_VERSION")
+            if not os.getenv("AZURE_OPENAI_ENDPOINT"):
+                missing_env.append("AZURE_OPENAI_ENDPOINT")
             if missing_env:
                 logger.warning(
                     f"API environment variables not set: {', '.join(missing_env)}. "
-                    f"UCSFVersaAPI requires these for initialization."
+                    f"AzureOpenAIAPI requires these for initialization."
                 )
             
             evaluator_config = {
-                "api_type": "ucsf_versa",
+                "api_type": "azure_openai",
                 "model": judge_model,
             }
         elif judge_api_type == "endpoint":
@@ -1116,7 +1116,7 @@ def run_benchmark(
                 "model": judge_model,
             }
         else:
-            logger.error(f"Unknown --judge-api-type: {judge_api_type}. Use 'ucsf_versa' or 'endpoint'")
+            logger.error(f"Unknown --judge-api-type: {judge_api_type}. Use 'azure_openai' or 'endpoint'")
             raise typer.Exit(code=1)
     
     if isinstance(output_dir, str):
@@ -1203,20 +1203,20 @@ def run_benchmark(
     for m in models_list:
         api_type = m.get("api_type", "endpoint")
         mod = m.get("model")
-        if api_type == "ucsf_versa":
+        if api_type == "azure_openai":
             if not mod:
-                logger.warning(f"Skipping model entry missing model (ucsf_versa): {m}")
+                logger.warning(f"Skipping model entry missing model (azure_openai): {m}")
                 continue
-            from recite.llmapis import UCSFVersaAPI
-            if mod not in UCSFVersaAPI.available_models:
+            from recite.llmapis import AzureOpenAIAPI
+            if mod not in AzureOpenAIAPI.available_models:
                 logger.warning(
-                    f"Model '{mod}' not in UCSFVersaAPI.available_models; skipping. "
-                    f"Available: {UCSFVersaAPI.available_models}"
+                    f"Model '{mod}' not in AzureOpenAIAPI.available_models; skipping. "
+                    f"Available: {AzureOpenAIAPI.available_models}"
                 )
                 continue
             model_id = _sanitize_model_id(m.get("id", mod))
             out_dir = output_dir / model_id
-            model = {"api_type": "ucsf_versa", "model": mod}
+            model = {"api_type": "azure_openai", "model": mod}
             if m.get("context_window") is not None:
                 model["context_window"] = int(m["context_window"])
             if m.get("no_rag_max_tokens") is not None:

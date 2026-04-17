@@ -6,7 +6,7 @@ A benchmark for evaluating LLMs on eligibility criteria revision using protocol 
 
 ## Prompts & Methodology
 
-Detailed prompt text (model prompts, judge rubrics, and the two-step revision approach) and additional supporting code will be publicly released within approximately 2 months as we complete a routine institutional IP process. The JSON structure in `config/benchmark_prompts.json` shows the expected schema, and full content will be restored in place once this process concludes. All other code, data, and evaluation infrastructure are fully available now.
+Detailed prompt text (model prompts, judge rubrics, and evaluation methodology) and additional supporting code will be publicly released within approximately 2 months as we complete a routine institutional IP process. The JSON structure in `config/benchmark_prompts.json` shows the expected schema, and full content will be restored in place once this process concludes. All other code, data, and evaluation infrastructure are fully available now.
 
 **Reviewer / early access:** We are happy to share the complete prompts and methodology details with reviewers or interested researchers upon request. Please contact Russell Ro (russell.ro@ucsf.edu) or Reza Abbasi-Asl (reza.abbasi-asl@ucsf.edu).
 

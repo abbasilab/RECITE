@@ -23,7 +23,7 @@ class Document:
 class Scores:
     relevance: int
     extraction_confidence: int
-    accrual_ease: int
+    applicability: int
     reasoning: str
 
 
@@ -519,7 +519,7 @@ def evaluate_paper(llm, doc: Document) -> Scores:
         return Scores(
             relevance=result.get("relevance", 1),
             extraction_confidence=result.get("extraction_confidence", 1),
-            accrual_ease=result.get("accrual_ease", 1),
+            applicability=result.get("applicability", 1),
             reasoning=result.get("reasoning", ""),
         )
     return Scores(1, 1, 1, "evaluation failed")

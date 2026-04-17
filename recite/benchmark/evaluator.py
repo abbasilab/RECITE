@@ -696,7 +696,7 @@ def _query_with_rag_retry(
     base_delay: float = 0.5,
     max_delay: float = 5.0,
     wait_for_revive_seconds: int = 0,
-    ucsf_versa_model: Optional[str] = None,
+    azure_openai_model: Optional[str] = None,
 ) -> str:
     """Call query_with_rag with retry logic."""
     raise NotImplementedError("RAG mode not available in this build")
@@ -719,8 +719,8 @@ def _query_with_rag_retry(
         kwargs["no_rag"] = rag_config["no_rag"]
     if rag_config.get("no_rag_max_tokens") is not None:
         kwargs["no_rag_max_tokens"] = rag_config["no_rag_max_tokens"]
-    if ucsf_versa_model is not None:
-        kwargs["ucsf_versa_model"] = ucsf_versa_model
+    if azure_openai_model is not None:
+        kwargs["azure_openai_model"] = azure_openai_model
     if rag_config.get("embed_local_model"):
         kwargs["embed_local_model"] = rag_config["embed_local_model"]
         kwargs["embed_device_index"] = rag_config.get("embed_device_index", "cuda:0")
@@ -733,7 +733,7 @@ def _query_with_rag_retry(
         except Exception as e:
             last_error = e
             if attempt < max_retries - 1:
-                if wait_for_revive_seconds > 0 and not ucsf_versa_model:
+                if wait_for_revive_seconds > 0 and not azure_openai_model:
                     try:
                         import time as _time
                         wait_secs = min(wait_for_revive_seconds, 60)
@@ -980,14 +980,14 @@ def llm_judge_evaluator(
         }
 
 
-def ucsf_versa_judge_evaluator(
+def azure_openai_judge_evaluator(
     ground_truth: str,
     prediction: str,
     model: str,
     prompts: Optional[BenchmarkPrompts] = None,
 ) -> Dict[str, float]:
-    """Judge evaluator via UCSFVersaAPI."""
-    from recite.llmapis import UCSFVersaAPI
+    """Judge evaluator via AzureOpenAIAPI."""
+    from recite.llmapis import AzureOpenAIAPI
     
     if prompts is None:
         prompts = load_benchmark_prompts()
@@ -999,7 +999,7 @@ def ucsf_versa_judge_evaluator(
     try:
         cache_key = (model, system_prompt)
         if cache_key not in _JUDGE_API_CACHE:
-            _JUDGE_API_CACHE[cache_key] = UCSFVersaAPI(model=model, system_prompt=system_prompt)
+            _JUDGE_API_CACHE[cache_key] = AzureOpenAIAPI(model=model, system_prompt=system_prompt)
         judge_api = _JUDGE_API_CACHE[cache_key]
         response = judge_api(user_prompt, system_prompt=system_prompt)
 
@@ -1087,7 +1087,7 @@ def batched_scorer(
     batch_size: int = 10,
 ) -> List[Dict[str, float]]:
     """Evaluate multiple samples in batched API calls."""
-    from recite.llmapis import UCSFVersaAPI
+    from recite.llmapis import AzureOpenAIAPI
 
     if prompts is None:
         prompts = load_benchmark_prompts()
@@ -1099,7 +1099,7 @@ def batched_scorer(
     all_metrics = []
     cache_key = (model, system_prompt)
     if cache_key not in _JUDGE_API_CACHE:
-        _JUDGE_API_CACHE[cache_key] = UCSFVersaAPI(model=model, system_prompt=system_prompt)
+        _JUDGE_API_CACHE[cache_key] = AzureOpenAIAPI(model=model, system_prompt=system_prompt)
     judge_api = _JUDGE_API_CACHE[cache_key]
     for start in range(0, len(samples), batch_size):
         batch = samples[start : start + batch_size]
@@ -1161,9 +1161,9 @@ def run_single_sample(
             model_callable = model
             is_endpoint = False
             use_two_step = False
-        elif isinstance(model, dict) and model.get("api_type") == "ucsf_versa" and "model" in model:
+        elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
             if rag_config is None:
-                raise ValueError("rag_config required for ucsf_versa model")
+                raise ValueError("rag_config required for azure_openai model")
             persist_dir_raw = rag_config.get("persist_dir")
             if persist_dir_raw is None:
                 raise ValueError("rag_config must include persist_dir")
@@ -1175,8 +1175,8 @@ def run_single_sample(
                 rag_cfg["similarity_top_k"] = model["top_k"]
             elif rag_cfg.get("similarity_top_k") is None and rag_cfg.get("top_k") is not None:
                 rag_cfg["similarity_top_k"] = rag_cfg["top_k"]
-            ucsf_versa_model = model["model"]
-            endpoint, llm_model = "n/a", ucsf_versa_model
+            azure_openai_model = model["model"]
+            endpoint, llm_model = "n/a", azure_openai_model
 
             def _call(
                 source_text: str,
@@ -1202,7 +1202,7 @@ def run_single_sample(
                     base_delay=0.5,
                     max_delay=max_delay,
                     wait_for_revive_seconds=wait_for_revive_seconds,
-                    ucsf_versa_model=ucsf_versa_model,
+                    azure_openai_model=azure_openai_model,
                 )
             model_callable = _call
             is_endpoint = True
@@ -1399,7 +1399,7 @@ def run_single_sample(
             model_callable = _call
             is_endpoint = True
         else:
-            raise ValueError("model must be a callable or dict with api_type ucsf_versa, endpoint/model, python_gpu, or vllm_endpoint")
+            raise ValueError("model must be a callable or dict with api_type azure_openai, endpoint/model, python_gpu, or vllm_endpoint")
 
         # Get prediction
         source_text = sample_row.get("source_text") or ""
@@ -1427,7 +1427,7 @@ def run_single_sample(
                 base_delay=0.5,
                 max_delay=max_delay,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "ucsf_versa" else None,
+                azure_openai_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "azure_openai" else None,
             )
             step2_user = tsp["step2_user_template"].format(
                 schema=schema_text, source_version=source_version, target_version=target_version, source_text=source_text,
@@ -1445,7 +1445,7 @@ def run_single_sample(
                 base_delay=0.5,
                 max_delay=max_delay,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "ucsf_versa" else None,
+                azure_openai_model=model.get("model") if isinstance(model, dict) and model.get("api_type") == "azure_openai" else None,
             )
         else:
             prediction = _call_model_with_truncation_retry(
@@ -1461,8 +1461,8 @@ def run_single_sample(
         default_metrics = default_evaluator(reference_text, prediction)
         if evaluator_type == "llm_judge" and evaluator_config:
             api_type = evaluator_config.get("api_type", "endpoint")
-            if api_type == "ucsf_versa" and "model" in evaluator_config:
-                llm_judge_metrics = ucsf_versa_judge_evaluator(
+            if api_type == "azure_openai" and "model" in evaluator_config:
+                llm_judge_metrics = azure_openai_judge_evaluator(
                     reference_text, prediction,
                     model=evaluator_config["model"],
                     prompts=prompts,
@@ -1543,14 +1543,14 @@ def run_benchmark(
         if use_two_step:
             logger.warning("two_step=True requires endpoint-based model; using single-step for callable")
             use_two_step = False
-    elif isinstance(model, dict) and model.get("api_type") == "ucsf_versa" and "model" in model:
-        ucsf_versa_model = model["model"]
+    elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
+        azure_openai_model = model["model"]
         endpoint = "n/a"
-        llm_model = ucsf_versa_model
+        llm_model = azure_openai_model
         is_endpoint = True
         if rag_config is None:
             raise ValueError(
-                "rag_config required for ucsf_versa model (embed_base_url, embed_model, persist_dir)."
+                "rag_config required for azure_openai model (embed_base_url, embed_model, persist_dir)."
             )
         persist_dir_raw = rag_config.get("persist_dir")
         if persist_dir_raw is None:
@@ -1588,7 +1588,7 @@ def run_benchmark(
                 rag_config=rag_cfg,
                 persist_dir=persist_dir,
                 wait_for_revive_seconds=wait_for_revive_seconds,
-                ucsf_versa_model=ucsf_versa_model,
+                azure_openai_model=azure_openai_model,
             )
     elif isinstance(model, dict) and model.get("api_type") == "python_gpu" and "model" in model:
         import torch
@@ -1782,7 +1782,7 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
     else:
-        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'ucsf_versa'/'vllm_endpoint'")
+        raise ValueError("model must be either a callable or a dict with 'endpoint'/'model' keys, or api_type 'python_gpu'/'azure_openai'/'vllm_endpoint'")
     
     splits = {}
     required_columns = ["source_text", "evidence", "reference_text", "id", "instance_id", "source_version", "target_version"]
@@ -1824,11 +1824,11 @@ def run_benchmark(
         
         api_type = evaluator_config.get("api_type", "endpoint")
 
-        if api_type == "ucsf_versa":
+        if api_type == "azure_openai":
             if "model" not in evaluator_config:
-                raise ValueError("ucsf_versa judge requires 'model' in evaluator_config")
+                raise ValueError("azure_openai judge requires 'model' in evaluator_config")
             judge_model = evaluator_config["model"]
-            llm_judge_eval_fn = lambda gt, pred: ucsf_versa_judge_evaluator(
+            llm_judge_eval_fn = lambda gt, pred: azure_openai_judge_evaluator(
                 gt, pred,
                 model=judge_model,
                 prompts=prompts,
@@ -1844,7 +1844,7 @@ def run_benchmark(
                 wait_for_revive_seconds=wait_for_revive_seconds,
             )
         else:
-            raise ValueError(f"Unknown api_type '{api_type}' in evaluator_config. Use 'ucsf_versa' or 'endpoint'")
+            raise ValueError(f"Unknown api_type '{api_type}' in evaluator_config. Use 'azure_openai' or 'endpoint'")
     elif evaluator_type != "default":
         raise ValueError(f"Unknown evaluator_type: {evaluator_type}. Use 'default' or 'llm_judge'")
     

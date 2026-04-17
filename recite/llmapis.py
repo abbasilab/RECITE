@@ -175,8 +175,8 @@ class OpenAIAPI(AbstractLLMAPI):
             return {'headers': [], 'entries': []}
 
 
-class UCSFVersaAPI(AbstractLLMAPI):
-    """Azure OpenAI API wrapper (UCSF Versa endpoint)."""
+class AzureOpenAIAPI(AbstractLLMAPI):
+    """Azure OpenAI API wrapper (Azure OpenAI endpoint)."""
     available_models = (
         "gpt-35-turbo",
         "gpt-35-turbo-0301",
@@ -224,9 +224,9 @@ class UCSFVersaAPI(AbstractLLMAPI):
             logger.error(f"Model '{model}' is not in the list of available models: {self.available_models}")
             raise ValueError(f"Model '{model}' is not in the list of available models: {self.available_models}")
         
-        self.api_key = os.getenv("UCSF_API_KEY")
-        self.api_version = os.getenv("UCSF_API_VER")
-        self.resource_endpoint = os.getenv("UCSF_RESOURCE_ENDPOINT")
+        self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        self.api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+        self.resource_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.max_retries = 2
         self.retry_secs = 3
 
@@ -235,23 +235,23 @@ class UCSFVersaAPI(AbstractLLMAPI):
 
         missing = []
         if not self.api_key:
-            missing.append("UCSF_API_KEY")
+            missing.append("AZURE_OPENAI_API_KEY")
         if not self.api_version:
-            missing.append("UCSF_API_VER or API_VERSION")
+            missing.append("AZURE_OPENAI_API_VERSION or API_VERSION")
         if not self.resource_endpoint:
-            missing.append("UCSF_RESOURCE_ENDPOINT")
+            missing.append("AZURE_OPENAI_ENDPOINT")
         if missing:
             logger.error(f"Missing required environment variables: {', '.join(missing)}")
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-        logger.info(f"UCSFVersaAPI initialized: model={model}")
+        logger.info(f"AzureOpenAIAPI initialized: model={model}")
 
         self._cost_guard_acknowledged = os.getenv("RECITE_CONFIRM_PAID_API", "").lower() in ("1", "true", "yes")
         if not self._cost_guard_acknowledged:
             logger.warning(
                 "\n"
                 "╔══════════════════════════════════════════════════════════════╗\n"
-                "║  COST GUARD: UCSFVersaAPI initialized without opt-in.       ║\n"
+                "║  COST GUARD: AzureOpenAIAPI initialized without opt-in.       ║\n"
                 "║  Set RECITE_CONFIRM_PAID_API=1 to allow paid API calls.     ║\n"
                 "║  Without this, all calls will be blocked with an error.     ║\n"
                 "╚══════════════════════════════════════════════════════════════╝"
@@ -265,7 +265,7 @@ class UCSFVersaAPI(AbstractLLMAPI):
             ) -> str:
         if not self._cost_guard_acknowledged:
             raise RuntimeError(
-                "COST GUARD: UCSFVersaAPI call blocked. This API costs real money "
+                "COST GUARD: AzureOpenAIAPI call blocked. This API costs real money "
                 "(~$30-60 per 3K samples). Set environment variable "
                 "RECITE_CONFIRM_PAID_API=1 to acknowledge costs and proceed."
             )
@@ -290,27 +290,27 @@ class UCSFVersaAPI(AbstractLLMAPI):
         base_delay = float(self.retry_secs)
         for attempt in range(self.max_retries + 1):
             try:
-                logger.debug(f"Calling UCSF Versa API at {url}")
+                logger.debug(f"Calling Azure OpenAI API at {url}")
                 response = requests.post(url, headers=headers, data=body, timeout=60)
                 response.raise_for_status()
                 resp_json = response.json()
                 if "choices" in resp_json and resp_json["choices"]:
                     raw = resp_json["choices"][0]["message"].get("content")
                     output = (raw.strip() if isinstance(raw, str) else (str(raw) if raw is not None else ""))
-                    logger.info("UCSF Versa API call successful.")
+                    logger.info("Azure OpenAI API call successful.")
                     return output
                 else:
-                    logger.error(f"UCSF Versa API response missing 'choices': {resp_json}")
+                    logger.error(f"Azure OpenAI API response missing 'choices': {resp_json}")
                     return ""
             except requests.exceptions.HTTPError as e:
                 if e.response is not None and e.response.status_code == 400:
                     logger.error(
-                        "UCSF Versa API 400 Bad Request (do not retry). "
+                        "Azure OpenAI API 400 Bad Request (do not retry). "
                         "Often caused by input exceeding context/token limit. Request body length: %s chars",
                         len(body),
                     )
                     raise
-                logger.error(f"UCSF Versa API call failed: {e}")
+                logger.error(f"Azure OpenAI API call failed: {e}")
                 if attempt >= self.max_retries:
                     raise
                 delay = base_delay * (2 ** attempt)
@@ -319,7 +319,7 @@ class UCSFVersaAPI(AbstractLLMAPI):
                 )
                 time.sleep(delay)
             except Exception as e:
-                logger.error(f"UCSF Versa API call failed: {e}")
+                logger.error(f"Azure OpenAI API call failed: {e}")
                 if attempt >= self.max_retries:
                     raise
                 delay = base_delay * (2 ** attempt)  # Exponential backoff
