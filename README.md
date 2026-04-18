@@ -4,6 +4,19 @@
 
 A benchmark for evaluating LLMs on eligibility criteria revision using protocol amendment evidence from ClinicalTrials.gov.
 
+## Quick Start
+
+```bash
+# Install
+uv sync
+
+# See available commands
+uv run recite --help
+
+# Run the full benchmark pipeline
+uv run recite benchmark init-benchmark
+```
+
 ## Prompts & Methodology
 
 Detailed prompt text (model prompts, judge rubrics, and evaluation methodology) and additional supporting code will be publicly released within approximately 2 months as we complete a routine institutional IP process. The JSON structure in `config/benchmark_prompts.json` shows the expected schema, and full content will be restored in place once this process concludes. All other code, data, and evaluation infrastructure are fully available now.
