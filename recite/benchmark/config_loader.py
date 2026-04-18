@@ -147,7 +147,7 @@ def get_experiment_specs(
         judge_model = model_type_map.get(judge_model_type, judge_model_type)
         evaluator_config = {"api_type": judge_api_type, "model": judge_model}
 
-    two_step = bench_config.get("two_step", False)
+    multi_stage = bench_config.get("multi_stage", False)
     batch_size = int(bench_config.get("batch_size", 10))
     num_samples = bench_config.get("num_samples")
     wait_for_revive_seconds = int(bench_config.get("wait_for_revive_seconds", 0))
@@ -173,7 +173,7 @@ def get_experiment_specs(
                 model["context_window"] = int(m["context_window"])
             if m.get("no_rag_max_tokens") is not None:
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
-            two_step_val = m.get("two_step", two_step)
+            multi_stage_val = m.get("multi_stage", multi_stage)
         elif api_type == "python_gpu":
             if not mod:
                 logger.warning(f"Skipping model entry missing model (python_gpu): {m}")
@@ -186,7 +186,7 @@ def get_experiment_specs(
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
             model["device"] = m.get("device", "cuda")
             model["gpus"] = int(m.get("gpus", 1))
-            two_step_val = m.get("two_step", two_step)
+            multi_stage_val = m.get("multi_stage", multi_stage)
         else:
             ep = m.get("endpoint")
             if not ep or not mod:
@@ -194,7 +194,7 @@ def get_experiment_specs(
                 continue
             model_id = _sanitize_model_id(m.get("id", mod))
             model = {"endpoint": ep, "model": mod}
-            two_step_val = m.get("two_step", two_step)
+            multi_stage_val = m.get("multi_stage", multi_stage)
 
         no_rag_max_tokens = _effective_no_rag_max_tokens(m)
 
@@ -210,7 +210,7 @@ def get_experiment_specs(
                     "prompts_snapshot": prompts_snapshot,
                     "evaluator_type": evaluator_type,
                     "evaluator_config": evaluator_config,
-                    "two_step": two_step_val,
+                    "multi_stage": multi_stage_val,
                     "batch_size": batch_size,
                     "num_samples": num_samples,
                     "wait_for_revive_seconds": wait_for_revive_seconds,
@@ -238,7 +238,7 @@ def get_experiment_specs(
                     "prompts_snapshot": prompts_snapshot,
                     "evaluator_type": evaluator_type,
                     "evaluator_config": evaluator_config,
-                    "two_step": two_step_val,
+                    "multi_stage": multi_stage_val,
                     "batch_size": batch_size,
                     "num_samples": num_samples,
                     "wait_for_revive_seconds": wait_for_revive_seconds,

@@ -678,7 +678,7 @@ def _run_one_benchmark_run(
     batch_size: int,
     num_samples: Optional[int],
     prompts_file: Path,
-    two_step_val: bool,
+    multi_stage_val: bool,
     rag_config: Optional[Dict[str, Any]],
     wait_for_revive_seconds: int,
     e2e_smoke: bool,
@@ -749,7 +749,7 @@ def _run_one_benchmark_run(
             batch_size=batch_size,
             num_samples=num_samples,
             prompts_path=prompts_file,
-            two_step=two_step_val,
+            multi_stage=multi_stage_val,
             rag_config=rag_cfg,
             wait_for_revive_seconds=wait_for_revive_seconds,
             done_sample_ids=done_sample_ids,
@@ -891,7 +891,7 @@ def run_benchmark(
         "--batch-size",
         help="Number of samples to process before saving checkpoint"
     ),
-    two_step: Optional[bool] = typer.Option(
+    multi_stage: Optional[bool] = typer.Option(
         None,
         "--two-step/--no-two-step",
         help="Use two-step flow (schema then amended EC). Default from config or False."
@@ -922,7 +922,7 @@ def run_benchmark(
 
     With --config (default config/benchmarks.yaml): run each model from config; by default
     train + val only (use --include-test to add test). With --model-endpoint and --model-name:
-    single-model run (config still supplies prompts, evaluator, two_step, top_k unless overridden).
+    single-model run (config still supplies prompts, evaluator, multi_stage, top_k unless overridden).
 
     Example (single model):
       uv run recite benchmark run-benchmark --model-endpoint http://localhost:8001/v1 --model-name llama-3.1-8b
@@ -989,8 +989,8 @@ def run_benchmark(
             evaluator_type = bench_config["evaluator_type"]
         if "batch_size" in bench_config and batch_size == 10:
             batch_size = int(bench_config["batch_size"])
-    cfg_two_step = bench_config.get("two_step", False) if bench_config else False
-    use_two_step = two_step if two_step is not None else cfg_two_step
+    cfg_multi_stage = bench_config.get("multi_stage", False) if bench_config else False
+    use_multi_stage = multi_stage if multi_stage is not None else cfg_multi_stage
     cfg_top_k = bench_config.get("top_k") if bench_config else None
     top_k_list = _normalize_top_k_list(top_k, cfg_top_k)
 
@@ -1134,7 +1134,7 @@ def run_benchmark(
             "rag_config": dict(rag_config) if rag_config else None,
             "evaluator_type": evaluator_type,
             "evaluator_config": evaluator_config,
-            "two_step": use_two_step,
+            "multi_stage": use_multi_stage,
             "batch_size": batch_size,
             "num_samples": num_samples,
             "prompts_file": str(prompts_file),
@@ -1157,7 +1157,7 @@ def run_benchmark(
                     "batch_size": batch_size,
                     "num_samples": num_samples,
                     "prompts_file": prompts_file,
-                    "two_step_val": use_two_step,
+                    "multi_stage_val": use_multi_stage,
                     "rag_config": rag_config,
                     "wait_for_revive_seconds": wait_for_revive_seconds,
                     "e2e_smoke": e2e_smoke,
@@ -1178,7 +1178,7 @@ def run_benchmark(
                 "batch_size": batch_size,
                 "num_samples": num_samples,
                 "prompts_file": prompts_file,
-                "two_step_val": use_two_step,
+                "multi_stage_val": use_multi_stage,
                 "rag_config": rag_config,
                 "wait_for_revive_seconds": wait_for_revive_seconds,
                 "e2e_smoke": e2e_smoke,
@@ -1221,9 +1221,9 @@ def run_benchmark(
                 model["context_window"] = int(m["context_window"])
             if m.get("no_rag_max_tokens") is not None:
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
-            two_step_m = m.get("two_step")
-            if two_step_m is None and bench_config:
-                two_step_m = bench_config.get("two_step", False)
+            multi_stage_m = m.get("multi_stage")
+            if multi_stage_m is None and bench_config:
+                multi_stage_m = bench_config.get("multi_stage", False)
         elif api_type == "python_gpu":
             if not mod:
                 logger.warning(f"Skipping model entry missing model (python_gpu): {m}")
@@ -1237,9 +1237,9 @@ def run_benchmark(
                 model["no_rag_max_tokens"] = int(m["no_rag_max_tokens"])
             model["device"] = m.get("device", "cuda")
             model["gpus"] = int(m.get("gpus", 1))
-            two_step_m = m.get("two_step")
-            if two_step_m is None and bench_config:
-                two_step_m = bench_config.get("two_step", False)
+            multi_stage_m = m.get("multi_stage")
+            if multi_stage_m is None and bench_config:
+                multi_stage_m = bench_config.get("multi_stage", False)
         elif api_type == "vllm_endpoint":
             ep = m.get("endpoint")
             if not ep or not mod:
@@ -1265,9 +1265,9 @@ def run_benchmark(
                 model["save_every"] = int(m["save_every"])
             if m.get("prompt_suffix") is not None:
                 model["prompt_suffix"] = str(m["prompt_suffix"])
-            two_step_m = m.get("two_step")
-            if two_step_m is None and bench_config:
-                two_step_m = bench_config.get("two_step", False)
+            multi_stage_m = m.get("multi_stage")
+            if multi_stage_m is None and bench_config:
+                multi_stage_m = bench_config.get("multi_stage", False)
         else:
             ep = m.get("endpoint")
             if not ep or not mod:
@@ -1279,11 +1279,11 @@ def run_benchmark(
             model_id = _sanitize_model_id(m.get("id", mod))
             out_dir = output_dir / model_id
             model = {"endpoint": ep, "model": mod}
-            two_step_m = m.get("two_step")
-            if two_step_m is None and bench_config:
-                two_step_m = bench_config.get("two_step", False)
+            multi_stage_m = m.get("multi_stage")
+            if multi_stage_m is None and bench_config:
+                multi_stage_m = bench_config.get("multi_stage", False)
 
-        two_step_val = two_step_m if two_step_m is not None else use_two_step
+        multi_stage_val = multi_stage_m if multi_stage_m is not None else use_multi_stage
         run_config_base = {
             "run_started_at": datetime.now(timezone.utc).isoformat(),
             "model_id": model_id,
@@ -1292,7 +1292,7 @@ def run_benchmark(
             "rag_config": dict(rag_config) if rag_config else None,
             "evaluator_type": evaluator_type,
             "evaluator_config": evaluator_config,
-            "two_step": two_step_val,
+            "multi_stage": multi_stage_val,
             "batch_size": batch_size,
             "num_samples": num_samples,
             "prompts_file": str(prompts_file),
@@ -1315,7 +1315,7 @@ def run_benchmark(
                     "batch_size": batch_size,
                     "num_samples": num_samples,
                     "prompts_file": prompts_file,
-                    "two_step_val": two_step_val,
+                    "multi_stage_val": multi_stage_val,
                     "rag_config": rag_config,
                     "wait_for_revive_seconds": wait_for_revive_seconds,
                     "e2e_smoke": e2e_smoke,
@@ -1337,7 +1337,7 @@ def run_benchmark(
                     "batch_size": batch_size,
                     "num_samples": num_samples,
                     "prompts_file": prompts_file,
-                    "two_step_val": two_step_val,
+                    "multi_stage_val": multi_stage_val,
                     "rag_config": rag_config,
                     "wait_for_revive_seconds": wait_for_revive_seconds,
                     "e2e_smoke": e2e_smoke,

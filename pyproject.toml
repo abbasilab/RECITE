@@ -55,3 +55,8 @@ markers = [
     "slow: slow tests",
     "network: tests that require network access (live API calls)",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -121,7 +121,7 @@ def init_results_db(conn: sqlite3.Connection) -> None:
             prompts_snapshot TEXT,
             evaluator_type TEXT,
             evaluator_config TEXT,
-            two_step INTEGER,
+            multi_stage INTEGER,
             batch_size INTEGER,
             num_samples INTEGER,
             wait_for_revive_seconds INTEGER,
@@ -253,7 +253,7 @@ def ensure_config(conn: sqlite3.Connection, config_metadata: Dict[str, Any]) -> 
     columns = [
         "id", "config_fingerprint", "model_id", "top_k", "no_rag", "parquet_paths",
         "prompts_file", "prompts_snapshot", "evaluator_type", "evaluator_config",
-        "two_step", "batch_size", "num_samples", "wait_for_revive_seconds",
+        "multi_stage", "batch_size", "num_samples", "wait_for_revive_seconds",
         "rag_config", "model", "config_path", "run_started_at", "config_json", "prompt_version", "created_at",
     ]
     values: List[Any] = [
@@ -267,7 +267,7 @@ def ensure_config(conn: sqlite3.Connection, config_metadata: Dict[str, Any]) -> 
         json.dumps(config_metadata.get("prompts_snapshot")) if isinstance(config_metadata.get("prompts_snapshot"), dict) else config_metadata.get("prompts_snapshot"),
         config_metadata.get("evaluator_type"),
         json.dumps(config_metadata.get("evaluator_config")) if config_metadata.get("evaluator_config") is not None else None,
-        1 if config_metadata.get("two_step") else 0,
+        1 if config_metadata.get("multi_stage") else 0,
         config_metadata.get("batch_size"),
         config_metadata.get("num_samples"),
         config_metadata.get("wait_for_revive_seconds"),
@@ -687,7 +687,7 @@ def migrate_from_benchmark_predictions(
                     "prompts_snapshot": run_config.get("prompts_snapshot"),
                     "evaluator_type": run_config.get("evaluator_type", "default"),
                     "evaluator_config": run_config.get("evaluator_config"),
-                    "two_step": run_config.get("two_step", False),
+                    "multi_stage": run_config.get("multi_stage", False),
                     "batch_size": run_config.get("batch_size"),
                     "num_samples": run_config.get("num_samples"),
                     "wait_for_revive_seconds": run_config.get("wait_for_revive_seconds"),

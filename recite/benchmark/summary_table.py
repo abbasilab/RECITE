@@ -56,7 +56,7 @@ def _field_explanations_md(include_run_config: bool = True) -> str:
 | **llm_judge_normalized** | 0–1 | llm_judge_score / 4 (scale 0–4). |
 
 ### Prompts
-- **Predictor:** System + user template from `config/benchmark_prompts.json` → `model_prompt.system`, `model_prompt.user_template` (or `user_template_rag` with evidence). Task: given source EC and evidence, output amended EC for target_version.
+- **Predictor:** System + user template from `config/benchmark_prompts.json` → `model_prompt.system`, `model_prompt.user_template` (or `user_template_rag` with evidence). Task: given source text and evidence, output reference text for target version.
 - **Judge:** `judge_prompt` in same file. Input: target (reference) and predicted EC. Output: two numbers — binary (0/1 acceptable) and ordinal (0–4 quality). Scale is `judge_prompt.score_scale` (default 0–4).
 
 """

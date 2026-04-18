@@ -19,6 +19,20 @@ from loguru import logger
 from recite.utils.path_loader import get_project_root
 
 
+_COLUMN_ALIASES = {
+    "source_text": "source_text",
+    "reference_text": "reference_text",
+    "source_version": "source_version",
+    "target_version": "target_version",
+    "instance_id": "instance_id",
+}
+
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename = {old: new for old, new in _COLUMN_ALIASES.items() if old in df.columns and new not in df.columns}
+    return df.rename(columns=rename) if rename else df
+
+
 _HF_CACHE_DIR_LOGGED = False
 
 
@@ -413,11 +427,11 @@ class BenchmarkPrompts:
         with open(config_path) as f:
             data = json.load(f)
 
-        two_step = data.get("multi_stage_prompts")
-        if two_step is None and all(
+        multi_stage = data.get("multi_stage_prompts")
+        if multi_stage is None and all(
             data.get(k) for k in ("step1_system", "step1_user_template", "step2_system", "step2_user_template")
         ):
-            two_step = {
+            multi_stage = {
                 "step1_system": data["step1_system"],
                 "step1_user_template": data["step1_user_template"],
                 "step2_system": data["step2_system"],
@@ -427,7 +441,7 @@ class BenchmarkPrompts:
         return cls(
             model_prompt=data["model_prompt"],
             judge_prompt=data["judge_prompt"],
-            multi_stage_prompts=two_step if isinstance(two_step, dict) else None,
+            multi_stage_prompts=multi_stage if isinstance(multi_stage, dict) else None,
             judge_prompt_batched=judge_batched if isinstance(judge_batched, dict) else None,
         )
 
@@ -1131,14 +1145,14 @@ def run_single_sample(
     evaluator_config: Optional[Dict[str, Any]] = None,
     prompts_path: Optional[Path] = None,
     split_name: str = "",
-    two_step: bool = False,
+    multi_stage: bool = False,
     wait_for_revive_seconds: int = 0,
     max_retries: int = 2,
     max_delay: float = 5.0,
 ) -> Optional[Dict[str, Any]]:
     """Run one sample through the model and evaluators. Returns None on failure."""
     prompts = load_benchmark_prompts(prompts_path)
-    use_two_step = two_step and prompts.multi_stage_prompts is not None
+    use_multi_stage = multi_stage and prompts.multi_stage_prompts is not None
 
     def _v(key: str, default: Any = None) -> Any:
         val = sample_row.get(key, default)
@@ -1160,7 +1174,7 @@ def run_single_sample(
         if callable(model):
             model_callable = model
             is_endpoint = False
-            use_two_step = False
+            use_multi_stage = False
         elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
             if rag_config is None:
                 raise ValueError("rag_config required for azure_openai model")
@@ -1411,7 +1425,7 @@ def run_single_sample(
         source_version = _v("source_version", 0)
         target_version = _v("target_version", 0)
 
-        if use_two_step and is_endpoint and prompts.multi_stage_prompts:
+        if use_multi_stage and is_endpoint and prompts.multi_stage_prompts:
             tsp = prompts.multi_stage_prompts
             step1_system = tsp.get("step1_system", "")
             step1_user = tsp["step1_user_template"]
@@ -1524,7 +1538,7 @@ def run_benchmark(
     batch_size: int = 1,
     num_samples: Optional[int] = None,
     prompts_path: Optional[Path] = None,
-    two_step: bool = False,
+    multi_stage: bool = False,
     rag_config: Optional[Dict[str, Any]] = None,
     wait_for_revive_seconds: int = 0,
     done_sample_ids: Optional[Dict[str, Set[int]]] = None,
@@ -1535,14 +1549,14 @@ def run_benchmark(
 
     prompts = load_benchmark_prompts(prompts_path)
 
-    use_two_step = two_step and prompts.multi_stage_prompts is not None
+    use_multi_stage = multi_stage and prompts.multi_stage_prompts is not None
 
     if callable(model):
         model_callable = model
         is_endpoint = False
-        if use_two_step:
-            logger.warning("two_step=True requires endpoint-based model; using single-step for callable")
-            use_two_step = False
+        if use_multi_stage:
+            logger.warning("multi_stage=True requires endpoint-based model; using single-step for callable")
+            use_multi_stage = False
     elif isinstance(model, dict) and model.get("api_type") == "azure_openai" and "model" in model:
         azure_openai_model = model["model"]
         endpoint = "n/a"
@@ -1789,7 +1803,7 @@ def run_benchmark(
 
     for split_name, path in parquet_paths.items():
         if path.exists():
-            df = pd.read_parquet(path)
+            df = _normalize_columns(pd.read_parquet(path))
 
             missing_cols = [col for col in required_columns if col not in df.columns]
             if missing_cols:
@@ -1885,7 +1899,7 @@ def run_benchmark(
 
         def _run_one_row(row_index: int) -> Tuple[PredictionRecord, Dict[str, Any]]:
             row = df.iloc[row_index]
-            if use_two_step and is_endpoint:
+            if use_multi_stage and is_endpoint:
                 tsp = prompts.multi_stage_prompts
                 evidence_str = row["evidence"] if row["evidence"] is not None else ""
                 step1_user = tsp["step1_user_template"]
@@ -1970,7 +1984,7 @@ def run_benchmark(
                         "Starting %s sample %s/%s",
                         split_name, sample_idx + 1, total_in_split,
                     )
-                    if use_two_step and is_endpoint:
+                    if use_multi_stage and is_endpoint:
                         tsp = prompts.multi_stage_prompts
                         evidence_str = row["evidence"] if row["evidence"] is not None else ""
                         step1_user = tsp["step1_user_template"]

@@ -1889,6 +1889,11 @@ rag = [
     { name = "torch" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.25" },
@@ -1914,6 +1919,9 @@ requires-dist = [
     { name = "typer", specifier = ">=0.9" },
 ]
 provides-extras = ["rag", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "regex"
