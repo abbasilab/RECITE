@@ -1,0 +1,62 @@
+[project]
+name = "recite"
+version = "0.1.0"
+description = "RECITE: Revising Eligibility Criteria Incorporating Textual Evidence"
+readme = "README.md"
+license = {text = "CC-BY-NC-SA-4.0"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Abbasi Lab, UCSF"},
+]
+dependencies = [
+    "typer>=0.9",
+    "loguru>=0.7",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.60",
+    "rich>=13.0",
+    "httpx>=0.25",
+    "requests>=2.31",
+    "pydantic>=2.0",
+    "pyarrow>=14.0",
+    "pandas>=2.1",
+    "openai>=1.0",
+    "tiktoken>=0.5",
+    "pymupdf>=1.23",
+]
+
+[project.optional-dependencies]
+rag = [
+    "llama-index-core>=0.10",
+    "llama-index-llms-openai-like>=0.1",
+    "llama-index-embeddings-huggingface>=0.1",
+    "sentence-transformers>=2.2",
+    "torch>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+]
+
+[project.scripts]
+recite = "recite.cli:app"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["recite*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests (may require API keys)",
+    "slow: slow tests",
+    "network: tests that require network access (live API calls)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

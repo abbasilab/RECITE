@@ -1,0 +1,31 @@
+PROTOCOL AMENDMENT #3
+Study NCT00000001: A Phase III Study of Experimental Drug X in Adults with Type 2 Diabetes
+Effective Date: March 15, 2024
+
+1. RATIONALE FOR AMENDMENT
+
+This amendment broadens the eligibility criteria based on interim safety data and
+recommendations from the Data Safety Monitoring Board (DSMB) review conducted on
+February 20, 2024. The DSMB concluded that the safety profile supports enrollment
+of a wider patient population.
+
+2. SUMMARY OF CHANGES
+
+2.1 Inclusion Criteria Changes:
+  - Upper age limit increased from 65 to 75 years to include elderly patients
+    who showed favorable response in the Phase II extension study.
+  - HbA1c upper limit raised from 10.0% to 11.0% to capture patients with
+    moderately uncontrolled diabetes who may benefit most.
+  - BMI range widened from 25-40 to 22-45 kg/m2 to include a broader
+    metabolic phenotype spectrum.
+
+2.2 Exclusion Criteria Changes:
+  - Renal threshold relaxed from eGFR < 60 to eGFR < 45 mL/min/1.73m2,
+    reflecting accumulated safety data in patients with mild-to-moderate
+    chronic kidney disease.
+
+3. EXPECTED IMPACT ON ENROLLMENT
+
+Based on registry analysis, these changes are projected to increase the eligible
+patient pool by approximately 35%, potentially adding 120 additional participants
+across all sites. The expanded age range alone accounts for an estimated 15% increase.

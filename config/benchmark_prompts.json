@@ -1,0 +1,28 @@
+{
+  "_notice": "Prompt details will be made available shortly — we are finalizing a routine intellectual property process and expect to release the full methodology within approximately 2 months.",
+  "model_prompt": {
+    "system": "[Prompt text available upon completion of IP process — see _notice]",
+    "user_template": "[Prompt text available upon completion of IP process — see _notice]",
+    "user_template_rag": "[Prompt text available upon completion of IP process — see _notice]"
+  },
+  "step1_system": "[Prompt text available upon completion of IP process — see _notice]",
+  "step1_user_template": "[Prompt text available upon completion of IP process — see _notice]",
+  "step2_system": "[Prompt text available upon completion of IP process — see _notice]",
+  "step2_user_template": "[Prompt text available upon completion of IP process — see _notice]",
+  "judge_prompt": {
+    "system": "[Prompt text available upon completion of IP process — see _notice]",
+    "user_template": "[Prompt text available upon completion of IP process — see _notice]",
+    "score_scale": "0-4"
+  },
+  "judge_prompt_batched": {
+    "system": "[Prompt text available upon completion of IP process — see _notice]",
+    "user_template": "[Prompt text available upon completion of IP process — see _notice]",
+    "score_scale": "0-4"
+  },
+  "multi_stage_prompts": {
+    "step1_system": "[Prompt text available upon completion of IP process — see _notice]",
+    "step1_user_template": "[Prompt text available upon completion of IP process — see _notice]",
+    "step2_system": "[Prompt text available upon completion of IP process — see _notice]",
+    "step2_user_template": "[Prompt text available upon completion of IP process — see _notice]"
+  }
+}

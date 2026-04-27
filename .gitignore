@@ -1,0 +1,28 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.egg-info/
+dist/
+build/
+.venv/
+.eggs/
+# Data directories (except benchmark splits tracked via Git LFS)
+data/dev/
+data/prod/
+data/llamaindex_cache/
+data/benchmark_predictions/
+data/hf_cache/
+output/
+logs/
+reports/
+dumps/
+*.log
+.DS_Store
+data/results/
+
+# Agent artifacts (ephemeral)
+.agent-sessions/
+briefings/
+TASK_BRIEFING.md

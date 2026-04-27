@@ -1,0 +1,17 @@
+# Paths used by the benchmark pipeline
+# ======================================
+
+# Data Directories
+data:
+  benchmarks: "data/benchmarks"
+
+# Cache Directories (for model weights)
+cache:
+  local: "~/.cache/huggingface"
+  cluster: "~/.cache/huggingface"
+
+# Output Directories
+output:
+  analysis: "output/analysis"
+  pipeline: "output/pipeline"
+  figs: "figs"
